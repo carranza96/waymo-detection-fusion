@@ -11,6 +11,15 @@ data = dict(samples_per_gpu=4)
 # img_norm_cfg = dict(
 #     mean=[103.530, 116.280, 123.675], std=[1.0, 1.0, 1.0], to_rgb=False)
 
+test_cfg = dict(
+    rpn=dict(
+        nms_across_levels=False,
+        nms_pre=300,
+        nms_post=300,
+        max_num=300,
+        nms_thr=0.7,
+        min_bbox_size=0))
+
 # lr is set for a batch size of 8
 optimizer = dict(type='SGD', lr=0.01, momentum=0.9, weight_decay=0.0001)
 optimizer_config = dict(grad_clip=None)

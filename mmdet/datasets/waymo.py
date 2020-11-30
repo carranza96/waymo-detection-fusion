@@ -9,6 +9,8 @@ from mmcv.utils import print_log
 from pycocotools.coco import COCO
 from pycocotools.cocoeval import COCOeval
 from terminaltables import AsciiTable
+from waymo_open_dataset import label_pb2
+from waymo_open_dataset.protos import metrics_pb2
 
 from mmdet.core import eval_recalls
 from .builder import DATASETS
@@ -17,7 +19,6 @@ from .custom import CustomDataset
 
 @DATASETS.register_module()
 class WaymoOpenDataset(CustomDataset):
-
     # "ALL_NS" setting (all object types except signs)
     CLASSES = ('TYPE_VEHICLE', 'TYPE_PEDESTRIAN', 'TYPE_CYCLIST')
     CLASSWISE_IOU = {
@@ -220,10 +221,14 @@ class WaymoOpenDataset(CustomDataset):
                     cx, cy, w, h = self.xyxy2cxcywh(bboxes[i])
                     class_name = self.CLASSES[label]
                     data = dict()
+                    data['filename'] = img_info['filename']
                     data['context_name'] = img_info['context_name']
                     data['timestamp_micros'] = img_info['timestamp_micros']
                     data['camera_name'] = img_info['camera_id']
                     data['frame_index'] = img_info['frame_id']
+                    data['time_of_day'] = img_info['time_of_day']
+                    data['location'] = img_info['location']
+                    data['weather'] = img_info['weather']
                     data['center_x'] = cx
                     data['center_y'] = cy
                     data['length'] = w  # length: dim x
@@ -323,6 +328,83 @@ class WaymoOpenDataset(CustomDataset):
             raise TypeError('invalid type of results')
         return result_files
 
+    def results2proto(self, results, outfile_prefix):
+        if isinstance(results[0], list):
+            dict_results = self._det2dicts(results)
+
+        detections = metrics_pb2.Objects()
+
+        for detection in dict_results:
+            obj = metrics_pb2.Object()
+
+            # fig = plt.figure()
+            # img = mpimg.imread('data/waymococo_f0/val2020/'+detection['filename'])
+            # plt.imshow(img)
+            #
+            # rect = patches.Rectangle((detection['center_x']-detection['length']/2, detection['center_y'] -detection['width']/2 )
+            #                          , detection['length'], detection['width'], linewidth=1, edgecolor='r', facecolor='none')
+            #
+            # ax = plt.gca()
+            # # Add the patch to the Axes
+            # ax.add_patch(rect)
+            # plt.show()
+
+            lab = label_pb2.Label()
+            lab.box.center_x = detection['center_x']
+            lab.box.center_y = detection['center_y']
+            lab.box.length = detection['length']
+            lab.box.width = detection['width']
+            lab.type = detection['type']
+
+            obj.object.MergeFrom(lab)
+            if detection['score']:
+                obj.score = detection['score']
+
+            obj.context_name = detection["context_name"]
+            obj.frame_timestamp_micros = detection["timestamp_micros"]
+            obj.camera_name = detection["camera_name"]
+
+            detections.objects.append(obj)
+
+        f = open(outfile_prefix + ".bin", 'wb')
+        serialized = detections.SerializeToString()
+        f.write(serialized)
+        f.close()
+
+    def anns2proto(self, outfile_prefix):
+        anns = self.coco.anns
+        ground_truths = metrics_pb2.Objects()
+
+        for _, ann in anns.items():
+            obj = metrics_pb2.Object()
+
+            img_info = self.data_infos[ann['image_id']]
+
+            x1, y1, w, h = ann['bbox']
+
+            cx = x1 + w / 2
+            cy = y1 + h / 2
+
+            lab = label_pb2.Label()
+            lab.box.center_x = cx
+            lab.box.center_y = cy
+            lab.box.length = w
+            lab.box.width = h
+            lab.type = 4 if ann['category_id'] == 3 else ann['category_id']
+            lab.detection_difficulty_level = 1 if ann['det_difficult'] == 0 else ann['det_difficult']
+            obj.object.MergeFrom(lab)
+
+            obj.context_name = img_info["context_name"]
+            obj.frame_timestamp_micros = img_info["timestamp_micros"]
+            obj.camera_name = img_info["camera_id"]
+
+            ground_truths.objects.append(obj)
+
+        f = open(outfile_prefix + "_gt.bin", 'wb')
+        serialized = ground_truths.SerializeToString()
+        f.write(serialized)
+        f.close()
+
     def results2json(self, results, outfile_prefix):
         """Dump the detection results to a COCO style json file.
 
@@ -419,6 +501,9 @@ class WaymoOpenDataset(CustomDataset):
 
         if format_type == 'waymo':
             result_files = self.results2dicts(results, outfile_prefix)
+            self.results2proto(results, outfile_prefix)
+            self.anns2proto(outfile_prefix)
+
         elif format_type == 'coco':
             result_files = self.results2json(results, outfile_prefix)
         else:
@@ -463,6 +548,8 @@ class WaymoOpenDataset(CustomDataset):
         for metric in metrics:
             if metric not in allowed_metrics:
                 raise KeyError(f'metric {metric} is not supported')
+
+        self.format_results(results, outfile_prefix, format_type='waymo')
 
         result_files, tmp_dir = self.format_results(
             results, outfile_prefix, format_type='coco')
@@ -598,6 +685,21 @@ class WaymoOpenDataset(CustomDataset):
                 eval_results[f'{metric}_mAP_copypaste'] = map_copypaste
                 print_log(
                     f'{metric}_mAP_copypaste: {map_copypaste}', logger=logger)
+
+        # # Filter L1,
+        # eval_results = {}
+        #
+        # levels = [0]
+        # for level in levels:
+        #     cocoGt_levels = copy.deepcopy(cocoGt)
+        #     cocoGt_levels.imgToAnns = {
+        #         imgId: [ann for ann in anns if ann['det_difficult'] == level]
+        #         for (imgId, anns) in cocoGt.imgToAnns.items()
+        #     }
+        #
+        # annsL1 = {k: v for (k, v) in cocoGt.anns.items() if v['det_difficult'] == 0}
+        # cocoGt_levels.anns = annsL1
+
         if tmp_dir is not None:
             tmp_dir.cleanup()
         return eval_results

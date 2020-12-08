@@ -7,7 +7,7 @@ _base_ = [
 model = dict(pretrained='torchvision://resnet101', backbone=dict(depth=101),
              roi_head=dict(bbox_head=dict(num_classes=3)))
 # data
-data = dict(samples_per_gpu=4)
+data = dict(samples_per_gpu=2)
 
 
 # lr is set for a batch size of 8
@@ -19,8 +19,8 @@ lr_config = dict(
     warmup='linear',
     warmup_iters=500,
     warmup_ratio=0.001,
-    step=[2])
-total_epochs = 3
+    step=[1])
+total_epochs = 2
 
 load_from = 'http://download.openmmlab.com/mmdetection/v2.0/faster_rcnn/faster_rcnn_r101_fpn_2x_coco/faster_rcnn_r101_fpn_2x_coco_bbox_mAP-0.398_20200504_210455-1d2dac9c.pth'
 # fp16 settings

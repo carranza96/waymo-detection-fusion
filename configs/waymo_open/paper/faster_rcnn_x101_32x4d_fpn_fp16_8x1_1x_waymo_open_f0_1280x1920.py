@@ -19,7 +19,7 @@ model = dict(
     roi_head=dict(bbox_head=dict(num_classes=3))
 )
 # data
-data = dict(samples_per_gpu=4)
+data = dict(samples_per_gpu=2)
 
 
 # lr is set for a batch size of 8
@@ -31,8 +31,8 @@ lr_config = dict(
     warmup='linear',
     warmup_iters=500,
     warmup_ratio=0.001,
-    step=[2])
-total_epochs = 3
+    step=[1])
+total_epochs = 2
 
 load_from = 'http://download.openmmlab.com/mmdetection/v2.0/faster_rcnn/faster_rcnn_x101_32x4d_fpn_2x_coco/faster_rcnn_x101_32x4d_fpn_2x_coco_bbox_mAP-0.412_20200506_041400-64a12c0b.pth'
 # fp16 settings

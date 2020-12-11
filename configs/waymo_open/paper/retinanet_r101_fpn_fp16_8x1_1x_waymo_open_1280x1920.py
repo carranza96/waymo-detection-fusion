@@ -1,5 +1,5 @@
 _base_ = [
-    '../../_base_/models/retinanet_r50_fpn.cpy',
+    '../../_base_/models/retinanet_r50_fpn.py',
     '../../_base_/datasets/waymo_detection_1280x1920.py',
     '../../_base_/schedules/schedule_1x.py', '../../_base_/default_runtime.py'
 ]
@@ -8,10 +8,10 @@ model = dict(pretrained='torchvision://resnet101',
              backbone=dict(depth=101),
              bbox_head=dict(num_classes=3))
 
-data = dict(samples_per_gpu=8)
+data = dict(samples_per_gpu=2)
 
 
-optimizer = dict(type='SGD', lr=0.01, momentum=0.9, weight_decay=0.0001)
+optimizer = dict(type='SGD', lr=0.0025, momentum=0.9, weight_decay=0.0001)
 optimizer_config = dict(grad_clip=None)
 # learning policy
 lr_config = dict(

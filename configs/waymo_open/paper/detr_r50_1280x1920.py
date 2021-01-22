@@ -1,5 +1,5 @@
 _base_ = [
-    '../../_base_/datasets/waymo_detection_640x960.py',
+    '../../_base_/datasets/waymo_detection_1280x1920.py',
     '../../_base_/default_runtime.py'
 
 ]
@@ -144,8 +144,8 @@ lr_config = dict(
     warmup='linear',
     warmup_iters=500,
     warmup_ratio=0.001,
-    step=[8,11])
-total_epochs = 12
+    step=[3,5])
+total_epochs = 6
 
 load_from = 'http://download.openmmlab.com/mmdetection/v2.0/detr/detr_r50_8x2_150e_coco/detr_r50_8x2_150e_coco_20201130_194835-2c4b8974.pth'
 

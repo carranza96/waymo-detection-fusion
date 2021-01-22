@@ -1,11 +1,11 @@
 _base_ = [
-    '../../_base_/models/faster_rcnn_r50_fpn.py',
+    '../../_base_/models/cascade_rcnn_r50_fpn.py',
     '../../_base_/datasets/waymo_detection_640x960.py',
     '../../_base_/schedules/schedule_1x.py', '../../_base_/default_runtime.py'
 ]
 # model
 
-model = dict(model = dict(pretrained='open-mmlab://res2net101_v1d_26w_4s',
+model = dict(pretrained='open-mmlab://res2net101_v1d_26w_4s',
             backbone=dict(type='Res2Net', depth=101, scales=4, base_width=26),
             roi_head=dict(bbox_head=[
             dict(
@@ -59,7 +59,7 @@ model = dict(model = dict(pretrained='open-mmlab://res2net101_v1d_26w_4s',
                     loss_weight=1.0),
                 loss_bbox=dict(type='SmoothL1Loss', beta=1.0, loss_weight=1.0))
         ]))
-        )
+
 
 # data
 data = dict(samples_per_gpu=8)

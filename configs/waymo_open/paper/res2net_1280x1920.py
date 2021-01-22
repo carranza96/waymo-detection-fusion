@@ -24,5 +24,6 @@ lr_config = dict(
 total_epochs = 6
 
 load_from = 'http://download.openmmlab.com/mmdetection/v2.0/res2net/faster_rcnn_r2_101_fpn_2x_coco/faster_rcnn_r2_101_fpn_2x_coco-175f1da6.pth'# fp16 settings
+# resume_from = 'saved_models/paper/res2net_1280x1920/epoch_1.pth'
 fp16 = dict(loss_scale=512.)
 

@@ -1,6 +1,7 @@
 import itertools
 import logging
 import os.path as osp
+from collections import OrderedDict
 import tempfile
 
 import mmcv
@@ -544,7 +545,7 @@ class WaymoOpenDataset(CustomDataset):
         """
 
         metrics = metric if isinstance(metric, list) else [metric]
-        allowed_metrics = ['bbox', 'segm', 'proposal', 'proposal_fast']
+        allowed_metrics = ['bbox', 'proposal_fast']
         for metric in metrics:
             if metric not in allowed_metrics:
                 raise KeyError(f'metric {metric} is not supported')

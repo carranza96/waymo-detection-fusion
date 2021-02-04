@@ -1,4 +1,4 @@
-MODEL=faster_rcnn_r50_c4_fp16_8x1_7e_waymo_open_f0
+MODEL=paper/yolo_640x960
 
-python tools/benchmark.py configs/waymo_open/${MODEL}.py \
+python tools/analysis_tools/benchmark.py configs/waymo_open/${MODEL}.py \
        saved_models/${MODEL}/latest.pth \

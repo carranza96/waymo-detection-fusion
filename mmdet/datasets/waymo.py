@@ -517,7 +517,7 @@ class WaymoOpenDataset(CustomDataset):
                  metric='bbox',
                  logger=None,
                  outfile_prefix=None,
-                 classwise=False,
+                 classwise=True,
                  proposal_nums=(100, 300, 1000),
                  largest_max_dets=None,
                  iou_thrs=np.arange(0.5, 0.96, 0.05)):
@@ -545,7 +545,7 @@ class WaymoOpenDataset(CustomDataset):
         """
 
         metrics = metric if isinstance(metric, list) else [metric]
-        allowed_metrics = ['bbox', 'proposal_fast']
+        allowed_metrics = ['bbox', 'proposal', 'proposal_fast']
         for metric in metrics:
             if metric not in allowed_metrics:
                 raise KeyError(f'metric {metric} is not supported')
@@ -687,20 +687,17 @@ class WaymoOpenDataset(CustomDataset):
                 print_log(
                     f'{metric}_mAP_copypaste: {map_copypaste}', logger=logger)
 
-        # # Filter L1,
+        # Filter Level 1
         # eval_results = {}
-        #
-        # levels = [0]
-        # for level in levels:
-        #     cocoGt_levels = copy.deepcopy(cocoGt)
-        #     cocoGt_levels.imgToAnns = {
-        #         imgId: [ann for ann in anns if ann['det_difficult'] == level]
-        #         for (imgId, anns) in cocoGt.imgToAnns.items()
-        #     }
+        # cocoGt.imgToAnns = {
+        #     imgId: [ann for ann in anns if ann['det_difficult'] == 0]
+        #     for (imgId, anns) in cocoGt.imgToAnns.items()
+        # }
         #
         # annsL1 = {k: v for (k, v) in cocoGt.anns.items() if v['det_difficult'] == 0}
         # cocoGt_levels.anns = annsL1
 
         if tmp_dir is not None:
             tmp_dir.cleanup()
-        return eval_results
+
+        return eval_results, waymo_iou_metrics

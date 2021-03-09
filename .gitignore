@@ -119,3 +119,12 @@ work_dirs/
 *.pth
 *.py~
 *.sh~
+
+
+# Custom ignores
+CLOCs/
+Weighted-Boxes-Fusion/
+/ensemble_study/ensemble_res
+stats_res/
+saved_models/
+plots/

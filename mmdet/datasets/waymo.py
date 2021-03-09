@@ -589,6 +589,12 @@ class WaymoOpenDataset(CustomDataset):
             cocoEval = COCOeval(cocoGt, cocoDt, iou_type)
             cocoEval.params.catIds = self.cat_ids
             cocoEval.params.imgIds = self.img_ids
+            # cocoEval.params.iouThrs = [0.7]
+            # cocoEval.params.areaRng = [[0, 10000000000.0]]
+            # cocoEval.params.maxDets = [100]
+            # Uncomment this line to match with mmdetection mean_ap script
+            # cocoEval.params.recThrs = np.arange(0, 1 + 1e-3, 0.1)
+
             if metric == 'proposal':
                 cocoEval.params.useCats = 0
                 cocoEval.params.maxDets = list(proposal_nums)

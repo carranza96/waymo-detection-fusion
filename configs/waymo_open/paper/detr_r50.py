@@ -123,7 +123,7 @@ img_norm_cfg = dict(
 #     val=dict(pipeline=test_pipeline),
 #     test=dict(pipeline=test_pipeline))
 
-data = dict(samples_per_gpu=1)
+data = dict(samples_per_gpu=8)
 
 
 # optimizer

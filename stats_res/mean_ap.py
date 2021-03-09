@@ -155,7 +155,9 @@ def tpfp_default(det_bboxes,
                  gt_bboxes,
                  gt_bboxes_ignore=None,
                  iou_thr=0.5,
-                 area_ranges=None):
+                 area_ranges=None,
+                 class_index=None,
+                 gt_bboxes_all_classes=None):
     """Check if detected bboxes are true positive or false positive.
 
     Args:
@@ -189,7 +191,13 @@ def tpfp_default(det_bboxes,
     tp = np.zeros((num_scales, num_dets), dtype=np.float32)
     fp = np.zeros((num_scales, num_dets), dtype=np.float32)
     fp_redundant = np.zeros((num_scales, num_dets), dtype=np.float32)
-    
+
+    gt_covered = []
+    ious_max = -1 * np.ones(num_dets, dtype=np.float32)
+    ious_argmax = -1 * np.ones(num_dets, dtype=np.float32)
+    matched_classes = -1*np.ones(num_dets, dtype=np.float32)
+
+
     # if there is no gt bboxes in this image, then all det bboxes
     # within area range are false positives
     if gt_bboxes.shape[0] == 0:
@@ -200,48 +208,85 @@ def tpfp_default(det_bboxes,
                 det_bboxes[:, 3] - det_bboxes[:, 1])
             for i, (min_area, max_area) in enumerate(area_ranges):
                 fp[i, (det_areas >= min_area) & (det_areas < max_area)] = 1
-        return tp, fp, [], [], [], [], [], []
 
-    ious = bbox_overlaps(det_bboxes, gt_bboxes)
-    # for each det, the max iou with all gts
-    ious_max = ious.max(axis=1)
-    # for each det, which gt overlaps most with it
-    ious_argmax = ious.argmax(axis=1)
-    # sort all dets in descending order by scores
-    sort_inds = np.argsort(-det_bboxes[:, -1])
-    for k, (min_area, max_area) in enumerate(area_ranges):
-        gt_covered = np.zeros(num_gts, dtype=bool)
-        # if no area range is specified, gt_area_ignore is all False
-        if min_area is None:
-            gt_area_ignore = np.zeros_like(gt_ignore_inds, dtype=bool)
-        else:
-            gt_areas = (gt_bboxes[:, 2] - gt_bboxes[:, 0]) * (
-                gt_bboxes[:, 3] - gt_bboxes[:, 1])
-            gt_area_ignore = (gt_areas < min_area) | (gt_areas >= max_area)
-        for i in sort_inds:
-            if ious_max[i] >= iou_thr:
-                matched_gt = ious_argmax[i]
-                if not (gt_ignore_inds[matched_gt]
-                        or gt_area_ignore[matched_gt]):
-                    if not gt_covered[matched_gt]:
-                        gt_covered[matched_gt] = True
-                        tp[k, i] = 1
-                    else:
-                        fp[k, i] = 1
-                        fp_redundant[k, i] = 1
-                # otherwise ignore this detected bbox, tp = 0, fp = 0
-            elif min_area is None:
-                fp[k, i] = 1
+        # return tp, fp, fp_redundant, gt_covered, ious_max, ious_argmax, -1 * np.ones(num_dets, dtype=np.float32), [], []
+
+    else:
+        ious = bbox_overlaps(det_bboxes, gt_bboxes)
+        # for each det, the max iou with all gts
+        ious_max = ious.max(axis=1)
+        # for each det, which gt overlaps most with it
+        ious_argmax = ious.argmax(axis=1)
+        # sort all dets in descending order by scores
+        sort_inds = np.argsort(-det_bboxes[:, -1])
+        for k, (min_area, max_area) in enumerate(area_ranges):
+            gt_covered = np.zeros(num_gts, dtype=bool)
+            # if no area range is specified, gt_area_ignore is all False
+            if min_area is None:
+                gt_area_ignore = np.zeros_like(gt_ignore_inds, dtype=bool)
             else:
-                bbox = det_bboxes[i, :4]
-                area = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
-                if area >= min_area and area < max_area:
+                gt_areas = (gt_bboxes[:, 2] - gt_bboxes[:, 0]) * (
+                    gt_bboxes[:, 3] - gt_bboxes[:, 1])
+                gt_area_ignore = (gt_areas < min_area) | (gt_areas >= max_area)
+            for i in sort_inds:
+                if ious_max[i] >= iou_thr:
+                    matched_gt = ious_argmax[i]
+                    if not (gt_ignore_inds[matched_gt]
+                            or gt_area_ignore[matched_gt]):
+                        if not gt_covered[matched_gt]:
+                            gt_covered[matched_gt] = True
+                            tp[k, i] = 1
+                        else:
+                            fp[k, i] = 1
+                            fp_redundant[k, i] = 1
+                    # otherwise ignore this detected bbox, tp = 0, fp = 0
+                elif min_area is None:
                     fp[k, i] = 1
+                else:
+                    bbox = det_bboxes[i, :4]
+                    area = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
+                    if area >= min_area and area < max_area:
+                        fp[k, i] = 1
+
+    if gt_bboxes.shape[0] != 0:
+        matched_classes[np.where(ious_max != 0)] = class_index
+
+    # Check if det matches gt from other class
+    if -1 in matched_classes and gt_bboxes_all_classes['bboxes'].shape[0] != 0:
+        unmatched_inds = np.where(matched_classes == -1)
+
+        ious_all_classes = bbox_overlaps(det_bboxes, gt_bboxes_all_classes['bboxes'])
+        ious_max_all_classes = ious_all_classes.max(axis=1)[unmatched_inds]
+        ious_argmax_all_classes = ious_all_classes.argmax(axis=1)[unmatched_inds]
+
+        labels = gt_bboxes_all_classes['labels'][ious_argmax_all_classes]
+        labels[np.where(ious_max_all_classes == 0)] = -1
+        matched_classes[unmatched_inds] = labels
+
+        new_iou_max = np.array(ious_max_all_classes, copy=True)
+        new_iou_max[np.where(ious_max_all_classes == 0)] = -1
+        ious_max[unmatched_inds] = new_iou_max
+
+        new_ious_argmax = np.array(ious_argmax_all_classes, copy=True)
+        new_ious_argmax[np.where(ious_max_all_classes == 0)] = -1
+        # Fix matched_gt_index. Find index within each class
+        for i in range(len(new_ious_argmax)):
+            index_all_gts = new_ious_argmax[i]
+            if index_all_gts != -1:
+                label = gt_bboxes_all_classes['labels'][index_all_gts]
+                new_ious_argmax[i] = np.where(gt_bboxes_all_classes['labels'][:index_all_gts] == label)[0].shape[0]
+
+        ious_argmax[unmatched_inds] = new_ious_argmax
 
     gt_iou_max, gt_iou_argmax = [], []
-    if det_bboxes.shape[0] != 0:
+    if det_bboxes.shape[0] != 0 and gt_bboxes.shape[0] != 0:
         gt_iou_max, gt_iou_argmax = ious.max(axis=0), ious.argmax(axis=0)
-    return tp, fp, fp_redundant, gt_covered, ious_max, ious_argmax, gt_iou_max, gt_iou_argmax
+        unmatched_inds = np.where(gt_iou_max == 0)
+        gt_iou_max[unmatched_inds] = -1
+        gt_iou_argmax[unmatched_inds] = -1
+
+    return tp, fp, fp_redundant, gt_covered, ious_max, ious_argmax, matched_classes, gt_iou_max, gt_iou_argmax
+
 
 
 def get_cls_results(det_results, annotations, class_id):
@@ -345,7 +390,9 @@ def eval_map(det_results,
             tpfp_fn,
             zip(cls_dets, cls_gts, cls_gts_ignore,
                 [iou_thr_c for _ in range(num_imgs)],
-                [area_ranges for _ in range(num_imgs)]))
+                [area_ranges for _ in range(num_imgs)],
+                [i for _ in range(num_imgs)],
+                annotations))
 
         # tp, fp = tuple(zip(*tpfp))
         # tpfp = [tpfp_fn(dets, gts, gts_ignore, iou_t, area_r) for dets, gts, gts_ignore, iou_t, area_r
@@ -353,9 +400,8 @@ def eval_map(det_results,
 
         # ## TODO: FIX names
         # tp, fp = tuple(zip(*[t[:2] for t in tpfp]))
-        tp, fp, fp_redundant, gt_covered, dets_iou_max, dets_iou_argmax, gt_iou_max, gt_iou_argmax = tuple(zip(* tpfp))
+        tp, fp, fp_redundant, gt_covered, dets_iou_max, dets_iou_argmax, dets_matched_class, gt_iou_max, gt_iou_argmax = tuple(zip(* tpfp))
         tp_list, fp_list = tp, fp
-
 
         # calculate gt number of each scale
         # ignored gts or gts beyond the specific scale are not counted
@@ -399,7 +445,8 @@ def eval_map(det_results,
             'fp_redundant': fp_redundant,
             'gt_covered':  gt_covered,
             'dets_iou_max': dets_iou_max, 
-            'dets_iou_argmax': dets_iou_argmax, 
+            'dets_iou_argmax': dets_iou_argmax,
+            'dets_matched_class': dets_matched_class,
             'gts_iou_max': gt_iou_max, 
             'gts_iou_argmax': gt_iou_argmax
         })

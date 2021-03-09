@@ -77,4 +77,4 @@ lr_config = dict(
 total_epochs = 3
 
 load_from = 'http://download.openmmlab.com/mmdetection/v2.0/res2net/cascade_rcnn_r2_101_fpn_20e_coco/cascade_rcnn_r2_101_fpn_20e_coco-f4b7b7db.pth'# fp16 settings
-# fp16 = dict(loss_scale=512.)
+fp16 = dict(loss_scale=512.)

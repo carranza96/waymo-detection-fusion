@@ -60,7 +60,7 @@ def find_matching_box(boxes_list, new_box, match_iou):
 
 def wbf(boxes_with_scores, weights=None, iou_threshold=0.55, skip_box_thr=0.0, conf_type='avg', allows_overflow=False):
 
-    ## TODO: Probably need to normalize coordinates
+    ## TODO: Probably need to normalize coordinates, not necessary
     # Sort by score in descending order
     if len(boxes_with_scores) == 0:
         return boxes_with_scores

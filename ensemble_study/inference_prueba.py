@@ -220,7 +220,7 @@ class EnsembleModel(nn.Module):
 
 
     def forward_train(self, img, img_metas, proposals=None, rescale=False):
-
+        pass
 
     def forward_test(self, img, img_metas, proposals=None, rescale=False):
         # for model in self.models[:-1]:
@@ -345,7 +345,7 @@ cfg.seed = None
 
 dataset = build_dataset(cfg.data.test)
 batch = 1
-train_detector(model, dataset, cfg)
+# train_detector(model, dataset, cfg)
 data_loader = build_dataloader(
         dataset,
         samples_per_gpu=batch,
@@ -372,6 +372,7 @@ for i, data in enumerate(data_loader):
         if i>5:
             times.append(t)
 
+    break
     if i == 500:
         break
 #

@@ -187,17 +187,16 @@ class AnchorHead(BaseDenseHead, BBoxTestMixin):
         Args:
             flat_anchors (Tensor): Multi-level anchors of the image, which are
                 concatenated into a single tensor of shape (num_anchors ,4)
-            valid_flags (Tensor): Multi level valid flags of the image,
+            valid_flags (Tensor): Multi-level valid flags of the image,
                 which are concatenated into a single tensor of
                     shape (num_anchors,).
             gt_bboxes (Tensor): Ground truth bboxes of the image,
                 shape (num_gts, 4).
-            img_meta (dict): Meta info of the image.
             gt_bboxes_ignore (Tensor): Ground truth bboxes to be
                 ignored, shape (num_ignored_gts, 4).
-            img_meta (dict): Meta info of the image.
             gt_labels (Tensor): Ground truth labels of each box,
                 shape (num_gts,).
+            img_meta (dict): Meta info of the image.
             label_channels (int): Channel of label.
             unmap_outputs (bool): Whether to map outputs back to the original
                 set of anchors.
@@ -222,8 +221,7 @@ class AnchorHead(BaseDenseHead, BBoxTestMixin):
         assign_result = self.assigner.assign(
             anchors, gt_bboxes, gt_bboxes_ignore,
             None if self.sampling else gt_labels)
-        sampling_result = self.sampler.sample(assign_result, anchors,
-                                              gt_bboxes)
+        sampling_result = self.sampler.sample(assign_result, anchors, gt_bboxes)
 
         num_valid_anchors = anchors.shape[0]
         bbox_targets = torch.zeros_like(anchors)

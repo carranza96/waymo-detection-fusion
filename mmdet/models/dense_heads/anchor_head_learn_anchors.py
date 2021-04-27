@@ -61,6 +61,7 @@ class AnchorHead(BaseDenseHead, BBoxTestMixin):
         self.num_classes = num_classes
         self.feat_channels = feat_channels
         self.use_sigmoid_cls = loss_cls.get('use_sigmoid', False)
+        
         # TODO better way to determine whether sample or not
         self.sampling = loss_cls['type'] not in [
             'FocalLoss', 'GHMC', 'QualityFocalLoss'
@@ -156,6 +157,12 @@ class AnchorHead(BaseDenseHead, BBoxTestMixin):
         """
         return multi_apply(self.forward_single, feats)
 
+    def log_anchors(self):
+        print("<RATIOS>", self.ratios)
+        print("<RATIOS GRAD>", self.ratios.grad)
+        print("<SCALES>", self.scales)
+        print("<SCALES GRAD>", self.scales.grad)
+
     def get_anchors(self, featmap_sizes, img_metas, device='cuda'):
         """Get anchors according to feature map sizes.
 
@@ -169,6 +176,17 @@ class AnchorHead(BaseDenseHead, BBoxTestMixin):
                 anchor_list (list[Tensor]): Anchors of each image.
                 valid_flag_list (list[Tensor]): Valid flags of each image.
         """
+        self.anchor_generator = build_anchor_generator(dict(
+            type='AnchorGenerator',
+            scales=torch.tensor([8.]).cuda(),
+            ratios=self.ratios,
+            strides=self.scales.clone().cpu().detach().numpy(),
+            base_sizes=self.scales
+            )
+        )
+
+        self.log_anchors()
+
         num_imgs = len(img_metas)
 
         # since feature map sizes of all images are the same, we only compute

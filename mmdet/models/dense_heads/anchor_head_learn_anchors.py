@@ -10,6 +10,7 @@ from ..builder import HEADS, build_loss
 from .base_dense_head import BaseDenseHead
 from .dense_test_mixins import BBoxTestMixin
 
+from datetime import datetime
 
 @HEADS.register_module()
 class AnchorHead(BaseDenseHead, BBoxTestMixin):
@@ -61,6 +62,10 @@ class AnchorHead(BaseDenseHead, BBoxTestMixin):
         self.num_classes = num_classes
         self.feat_channels = feat_channels
         self.use_sigmoid_cls = loss_cls.get('use_sigmoid', False)
+
+        self.log_count = 0
+        
+        self.dateAndTime = datetime.now().strftime("%Y-%M-%d_%H-%M-%S")
         
         # TODO better way to determine whether sample or not
         self.sampling = loss_cls['type'] not in [
@@ -158,10 +163,24 @@ class AnchorHead(BaseDenseHead, BBoxTestMixin):
         return multi_apply(self.forward_single, feats)
 
     def log_anchors(self):
-        print("<RATIOS>", self.ratios)
-        print("<RATIOS GRAD>", self.ratios.grad)
-        print("<SCALES>", self.scales)
-        print("<SCALES GRAD>", self.scales.grad)
+        '''Write anchor ratios and scales to log file.'''
+
+        if self.log_count%10 == 1:
+            log =  "<RATIOS>" + str(self.ratios.clone().cpu().detach().numpy()) + " "
+            log += "<SCALES>" + str(self.scales.clone().cpu().detach().numpy()) + " "
+            log += "<RATIOS GRAD>" + str(self.ratios.grad.cpu().detach().numpy()) + " "
+            log += "<SCALES GRAD>" + str(self.scales.grad.cpu().detach().numpy()) + "\n"
+            
+            f = open(f"log_pablo/anchors_log_{self.dateAndTime}.txt", "a+")
+            f.write(log)
+            f.close()
+
+            # print(
+            #     "<RATIOS>", self.ratios.clone().cpu().detach().numpy(),
+            #     "<SCALES>", self.scales.clone().cpu().detach().numpy(),
+            #     "<RATIOS GRAD>", self.ratios.grad.cpu().detach().numpy(),
+            #     "<SCALES GRAD>", self.scales.grad.cpu().detach().numpy(),
+            # )
 
     def get_anchors(self, featmap_sizes, img_metas, device='cuda'):
         """Get anchors according to feature map sizes.
@@ -176,6 +195,8 @@ class AnchorHead(BaseDenseHead, BBoxTestMixin):
                 anchor_list (list[Tensor]): Anchors of each image.
                 valid_flag_list (list[Tensor]): Valid flags of each image.
         """
+
+        # TODO: Implement better the following lines
         self.anchor_generator = build_anchor_generator(dict(
             type='AnchorGenerator',
             scales=torch.tensor([8.]).cuda(),
@@ -186,6 +207,7 @@ class AnchorHead(BaseDenseHead, BBoxTestMixin):
         )
 
         self.log_anchors()
+        self.log_count += 1
 
         num_imgs = len(img_metas)
 

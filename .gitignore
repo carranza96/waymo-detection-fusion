@@ -128,3 +128,4 @@ stats_res/
 saved_models/
 plots/
 log*
+DetVisGUI/*

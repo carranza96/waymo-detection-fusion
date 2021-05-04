@@ -67,6 +67,7 @@ class LoadImageFromFile(object):
         results['img_shape'] = img.shape
         results['ori_shape'] = img.shape
         results['img_fields'] = ['img']
+        results['id'] = results['img_info']['id']
         return results
 
     def __repr__(self):

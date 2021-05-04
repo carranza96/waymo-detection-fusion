@@ -1,3 +1,6 @@
 [submodule "waymo-open-dataset"]
 	path = waymo-open-dataset
 	url = https://github.com/carranza96/waymo-open-dataset.git
+[submodule "DetVisGUI"]
+	path = DetVisGUI
+	url = https://github.com/carranza96/DetVisGUI

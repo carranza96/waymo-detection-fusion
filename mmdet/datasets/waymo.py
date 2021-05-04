@@ -520,7 +520,8 @@ class WaymoOpenDataset(CustomDataset):
                  classwise=True,
                  proposal_nums=(100, 300, 1000),
                  largest_max_dets=None,
-                 iou_thrs=np.arange(0.5, 0.96, 0.05)):
+                 iou_thrs=np.arange(0.5, 0.96, 0.05),
+                 waymo_metrics=False):
         """Evaluation in COCO protocol.
 
         Args:
@@ -706,4 +707,7 @@ class WaymoOpenDataset(CustomDataset):
         if tmp_dir is not None:
             tmp_dir.cleanup()
 
-        return eval_results, waymo_iou_metrics
+        if not waymo_metrics:
+            return eval_results
+        else:
+            return eval_results, waymo_iou_metrics

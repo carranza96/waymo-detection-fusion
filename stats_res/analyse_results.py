@@ -179,11 +179,18 @@ def stats_results(models, filt_scores=[0], training_results=False, output='stat_
     return list_eval_results
 
 
-models = ['faster_rcnn_r50_fpn_fp16_4x1_3e_1280x1920']
-# models = ['ensemble/nms_faster50_cascade50_3e']
-
+# models = ['faster_rcnn_r50_fpn_fp16_4x1_3e_1280x1920', 'retinanet_r50_fpn_fp16_4x1_3e_1280x1920',
+#           'ensemble/nms_faster50_retina50_3e', 'ensemble/wbf_faster50_retina50_3e']
+# models = ['retinanet_r50_fpn_fp16_4x2_1x_1280x1920']
+# models = ['faster_rcnn_r50_fpn_fp16_4x2_1x_1280x1920']
+# models = ['ensemble/wbf_faster50_retina50_1x']
+# models = ['ensemble/fusion_faster50_retina50_3e']
+# models = ['faster_rcnn_r50_fpn_fp16_4x1_3e_1280x1920']
+# models = ['retinanet_r50_fpn_fp16_4x1_3e_1280x1920']
+models = ['retinanet_r50_fpn_fp16_4x2_1x_1280x1920']
 # models = [dir for dir in os.listdir("saved_models/study/")]
-list_eval_results = stats_results(models, filt_scores=[0], training_results=False, output='stat_res.csv', full_stats=True)
+list_eval_results = stats_results(models, filt_scores=[0], training_results=False, output='stat_res.csv', full_stats=False,
+                                  dataset_config='saved_models/study/faster_rcnn_r50_fpn_fp16_4x1_3e_1280x1920/faster_rcnn_r50_fpn_fp16_4x1_3e_1280x1920.py')
 
 
 #

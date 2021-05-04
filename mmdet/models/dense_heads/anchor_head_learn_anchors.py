@@ -1,3 +1,6 @@
+
+# TODO: Copiar estos cambios a anchor_head_learn_anchors
+
 import torch
 import torch.nn as nn
 from mmcv.cnn import normal_init
@@ -65,7 +68,7 @@ class AnchorHead(BaseDenseHead, BBoxTestMixin):
 
         self.log_count = 0
         
-        self.dateAndTime = datetime.now().strftime("%Y-%M-%d_%H-%M-%S")
+        self.dateAndTime = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         
         # TODO better way to determine whether sample or not
         self.sampling = loss_cls['type'] not in [
@@ -110,8 +113,16 @@ class AnchorHead(BaseDenseHead, BBoxTestMixin):
         # except SSD detectors
         self.num_anchors = self.anchor_generator.num_base_anchors[0]
 
-        self.scales = nn.Parameter(torch.tensor(self.anchor_generator.base_sizes, dtype=torch.float32, requires_grad=True))
-        self.ratios = nn.Parameter(torch.tensor(self.anchor_generator.ratios, dtype=torch.float32, requires_grad=True))
+        self.scales = nn.Parameter(torch.tensor(
+                self.anchor_generator.base_sizes,
+                dtype=torch.float32,
+                requires_grad=True
+            ).log()) # Scales and ratios are log-transformed
+        self.ratios = nn.Parameter(torch.tensor(
+                self.anchor_generator.ratios,
+                dtype=torch.float32,
+                requires_grad=True
+            ).log())
 
         self._init_layers()
 
@@ -163,18 +174,15 @@ class AnchorHead(BaseDenseHead, BBoxTestMixin):
         return multi_apply(self.forward_single, feats)
 
     def log_anchors(self):
-        '''Write anchor ratios and scales to log file.'''
-
         if self.log_count%10 == 1:
             log =  "<RATIOS>" + str(self.ratios.clone().cpu().detach().numpy()) + " "
             log += "<SCALES>" + str(self.scales.clone().cpu().detach().numpy()) + " "
             log += "<RATIOS GRAD>" + str(self.ratios.grad.cpu().detach().numpy()) + " "
             log += "<SCALES GRAD>" + str(self.scales.grad.cpu().detach().numpy()) + "\n"
             
-            f = open(f"log_pablo/anchors_log_{self.dateAndTime}.txt", "a+")
-            f.write(log)
-            f.close()
-
+            with open(f"log_pablo/anchors_log_{self.dateAndTime}.txt", "a+") as f:
+                f.write(log)
+            
             # print(
             #     "<RATIOS>", self.ratios.clone().cpu().detach().numpy(),
             #     "<SCALES>", self.scales.clone().cpu().detach().numpy(),
@@ -195,7 +203,7 @@ class AnchorHead(BaseDenseHead, BBoxTestMixin):
                 anchor_list (list[Tensor]): Anchors of each image.
                 valid_flag_list (list[Tensor]): Valid flags of each image.
         """
-
+        
         # TODO: Implement better the following lines
         self.anchor_generator = build_anchor_generator(dict(
             type='AnchorGenerator',
@@ -206,6 +214,7 @@ class AnchorHead(BaseDenseHead, BBoxTestMixin):
             )
         )
 
+        # Write in log file
         self.log_anchors()
         self.log_count += 1
 

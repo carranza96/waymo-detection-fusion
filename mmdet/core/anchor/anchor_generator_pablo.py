@@ -1,4 +1,5 @@
 import mmcv
+import math
 import numpy as np
 import torch
 from torch.nn.modules.utils import _pair
@@ -141,8 +142,8 @@ class AnchorGenerator(object):
             multi_level_base_anchors.append(
                 self.gen_single_level_base_anchors(
                     base_size,
-                    scales=self.scales,
-                    ratios=self.ratios,
+                    scales=self.scales.exp(), # Undo log conversion
+                    ratios=self.ratios.exp(),
                     center=center))
         return multi_level_base_anchors
 

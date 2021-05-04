@@ -58,7 +58,7 @@ test_pipeline = [
 ]
 
 data = dict(
-    samples_per_gpu=1,
+    samples_per_gpu=2,
     train=dict(
         type=dataset_type,
         ann_file=data_root + 'annotations/instances_train2020.json',
@@ -91,7 +91,9 @@ lr_config = dict(
 total_epochs = 6
 runner = dict(type='EpochBasedRunner', max_epochs=6)
 
-load_from = 'https://s3.ap-northeast-2.amazonaws.com/open-mmlab/mmdetection/models/faster_rcnn_r50_c4_2x-6e4fdf4f.pth'
+# load_from = 'https://s3.ap-northeast-2.amazonaws.com/open-mmlab/mmdetection/models/faster_rcnn_r50_c4_2x-6e4fdf4f.pth'
+# load_from = 'https://s3.ap-northeast-2.amazonaws.com/open-mmlab/mmdetection/models/faster_rcnn_r50_caffe_c4_2x-71c67f27.pth'
+load_from = 'saved_models/faster_rcnn_r50_caffe_c4_2x-71c67f27_mod.pth'
 
 # fp16 settings
 fp16 = dict(loss_scale=512.)

@@ -10,12 +10,7 @@ from numba import jit
 from mean_ap import eval_map, get_cls_results
 from wbf import wbf
 
-models = ['faster_rcnn_r50_fpn_fp16_4x1_3e_1280x1920', 'cascade_rcnn_r50_fpn_fp16_2x1_3e_1280x1920', 'cascade_rcnn_res2net_fpn_fp16_1x1_3e_1280x1920']
-resFiles = ["saved_models/study/{}/results.pkl".format(model) for model in models]
 
-cfg = Config.fromfile("saved_models/study/{}/{}.py".format(models[0], models[0]))
-cfg.data.test.test_mode = True  #To avoid filtering out images without gts
-dataset = build_dataset(cfg.data.test)
 
 
 
@@ -84,18 +79,37 @@ def ensembleDetections(dets, cfg):
 
 
 
+if __name__ == "__main__":
 
-cfg = {'type': 'nms', 'iou_threshold': 0.7}
-# cfg = {'type': 'soft_nms', 'iou_threshold': 0.3, 'sigma': 0.5, 'min_score': 1e-3, 'method': 'linear'}
-# cfg = {'type': 'wbf'}
+    # models = ['faster_rcnn_r50_fpn_fp16_4x1_3e_1280x1920', 'cascade_rcnn_r50_fpn_fp16_2x1_3e_1280x1920',
+    #           'cascade_rcnn_res2net_fpn_fp16_1x1_3e_1280x1920']
+    # models = ['faster_rcnn_r50_fpn_fp16_4x2_1x_1280x1920', 'retinanet_r50_fpn_fp16_4x2_1x_1280x1920']
+    # models = ['faster_rcnn_r50_fpn_fp16_4x1_3e_1280x1920']
+    models = ['faster_rcnn_r50_fpn_fp16_4x1_3e_1280x1920', 'retinanet_r50_fpn_fp16_4x1_3e_1280x1920']
 
-combined_dets = loadResults(resFiles)
-ensemble_dets = [ensembleDetections(dets, cfg) for dets in combined_dets]
-# time = [n[1] for n in nms_output]
-# print(np.mean(time))
-# res = dataset.evaluate(ensemble_dets)
-print()
+    resFiles = ["saved_models/study/{}/results_sample.pkl".format(model) for model in models]
 
-anns = [dataset.get_ann_info(n) for n in range(len(ensemble_dets))]
-mean_ap, eval_results, df_summary = eval_map(ensemble_dets, anns, nproc=4, model_name=models[0])
-mmcv.dump(ensemble_dets, "results.pkl")
+    cfg = Config.fromfile("saved_models/study/{}/{}.py".format(models[0], models[0]))
+    cfg.data.test.test_mode = True  # To avoid filtering out images without gts
+    dataset = build_dataset(cfg.data.test)
+
+
+    cfg = {'type': 'nms', 'iou_threshold': 0.7}
+    # cfg = {'type': 'soft_nms', 'iou_threshold': 0.3, 'sigma': 0.5, 'min_score': 1e-3, 'method': 'linear'}
+    # cfg = {'type': 'wbf', 'iou_threshold': 0.7}
+
+    combined_dets = loadResults(resFiles)
+    ensemble_dets = [ensembleDetections(dets, cfg) for dets in combined_dets]
+    # time = [n[1] for n in nms_output]
+    # print(np.mean(time))
+    # res = dataset.evaluate(ensemble_dets)
+    print()
+
+    for i in range(len(ensemble_dets)):
+        ensemble_dets[i][0] = ensemble_dets[i][0][ensemble_dets[i][0][:, 4] > 0.05]
+        ensemble_dets[i][1] = ensemble_dets[i][1][ensemble_dets[i][1][:, 4] > 0.05]
+        ensemble_dets[i][2] = ensemble_dets[i][2][ensemble_dets[i][2][:, 4] > 0.05]
+
+    anns = [dataset.get_ann_info(n) for n in range(len(ensemble_dets))]
+    mean_ap, eval_results, df_summary, recalls, precisions = eval_map(ensemble_dets, anns, nproc=4, model_name=models[0])
+    mmcv.dump(ensemble_dets, "results_sample.pkl")

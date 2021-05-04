@@ -91,10 +91,7 @@ class AnchorGenerator(object):
             'scales and octave_base_scale with scales_per_octave cannot' \
             ' be set at the same time'
         if scales is not None:
-            if torch.is_tensor(scales):
-                self.scales = scales
-            else:
-                self.scales = torch.Tensor(scales)
+            self.scales = torch.Tensor(scales)
         elif octave_base_scale is not None and scales_per_octave is not None:
             octave_scales = np.array(
                 [2**(i / scales_per_octave) for i in range(scales_per_octave)])
@@ -106,11 +103,7 @@ class AnchorGenerator(object):
 
         self.octave_base_scale = octave_base_scale
         self.scales_per_octave = scales_per_octave
-        if torch.is_tensor(ratios):
-            self.ratios = ratios
-        else:
-            self.ratios = torch.Tensor(ratios)
-
+        self.ratios = torch.Tensor(ratios)
         self.scale_major = scale_major
         self.centers = centers
         self.center_offset = center_offset

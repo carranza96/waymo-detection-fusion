@@ -12,13 +12,20 @@ model = dict(
             nms_pre=2000,
             max_per_img=1000,
         )
+    ),
+    test_cfg=dict(
+        rpn=dict(
+            nms_pre=1000,
+            max_per_img=1000,
+            nms=dict(type='nms', iou_threshold=0.7),
+            min_bbox_size=0
+        )
     )
 )
-# data
-data = dict(samples_per_gpu=2)
 
 dataset_type = 'WaymoOpenDataset'
 data_root = '../waymococo_f0/'
+
 
 # use caffe img_norm
 img_norm_cfg = dict(
@@ -49,7 +56,9 @@ test_pipeline = [
             dict(type='Collect', keys=['img']),
         ])
 ]
+
 data = dict(
+    samples_per_gpu=1,
     train=dict(
         type=dataset_type,
         ann_file=data_root + 'annotations/instances_train2020.json',
@@ -67,6 +76,7 @@ data = dict(
         pipeline=test_pipeline))
 
 
+
 # LR is set for a batch size of 8
 optimizer = dict(type='SGD', lr=0.0025, momentum=0.9, weight_decay=0.0001)
 optimizer_config = dict(grad_clip=None)
@@ -81,7 +91,7 @@ lr_config = dict(
 total_epochs = 6
 runner = dict(type='EpochBasedRunner', max_epochs=6)
 
-
 load_from = 'https://download.openmmlab.com/mmdetection/v2.0/faster_rcnn/faster_rcnn_r50_caffe_dc5_1x_coco/faster_rcnn_r50_caffe_dc5_1x_coco_20201030_151909-531f0f43.pth'
+
 # fp16 settings
 fp16 = dict(loss_scale=512.)

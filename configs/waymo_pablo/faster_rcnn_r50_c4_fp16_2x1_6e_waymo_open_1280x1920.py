@@ -1,7 +1,8 @@
 _base_ = [
     '../_base_/models/faster_rcnn_r50_caffe_c4.py',
-    '../_base_/datasets/waymo_detection.py',
-    '../_base_/schedules/schedule_1x.py', '../_base_/default_runtime.py'
+    '../_base_/datasets/waymo_detection_1280x1920.py',
+    '../_base_/schedules/schedule_1x.py',
+    '../_base_/default_runtime.py'
 ]
 # model
 model = dict(
@@ -11,11 +12,16 @@ model = dict(
             nms_pre=2000,
             max_per_img=1000,
         )
+    ),
+    test_cfg=dict(
+        rpn=dict(
+            nms_pre=1000,
+            max_per_img=1000,
+            nms=dict(type='nms', iou_threshold=0.7),
+            min_bbox_size=0
+        )
     )
 )
-
-# data
-data = dict(samples_per_gpu=2)
 
 dataset_type = 'WaymoOpenDataset'
 data_root = '../waymococo_f0/'
@@ -52,6 +58,7 @@ test_pipeline = [
 ]
 
 data = dict(
+    samples_per_gpu=1,
     train=dict(
         type=dataset_type,
         ann_file=data_root + 'annotations/instances_train2020.json',

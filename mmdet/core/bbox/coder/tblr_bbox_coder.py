@@ -168,9 +168,10 @@ def tblr2bboxes(priors,
     if normalize_by_wh:
         wh = priors[..., 2:4] - priors[..., 0:2]
         w, h = torch.split(wh, 1, dim=-1)
-        loc_decode[..., :2] *= h  # tb
-        loc_decode[..., 2:] *= w  # lr
-
+        # Inplace operation with slice would failed for exporting to ONNX
+        th = h * loc_decode[..., :2]  # tb
+        tw = w * loc_decode[..., 2:]  # lr
+        loc_decode = torch.cat([th, tw], dim=-1)
     # Cannot be exported using onnx when loc_decode.split(1, dim=-1)
     top, bottom, left, right = loc_decode.split((1, 1, 1, 1), dim=-1)
     xmin = prior_centers[..., 0].unsqueeze(-1) - left
@@ -181,6 +182,13 @@ def tblr2bboxes(priors,
     bboxes = torch.cat((xmin, ymin, xmax, ymax), dim=-1)
 
     if clip_border and max_shape is not None:
+        # clip bboxes with dynamic `min` and `max` for onnx
+        if torch.onnx.is_in_onnx_export():
+            from mmdet.core.export import dynamic_clip_for_onnx
+            xmin, ymin, xmax, ymax = dynamic_clip_for_onnx(
+                xmin, ymin, xmax, ymax, max_shape)
+            bboxes = torch.cat([xmin, ymin, xmax, ymax], dim=-1)
+            return bboxes
         if not isinstance(max_shape, torch.Tensor):
             max_shape = priors.new_tensor(max_shape)
         max_shape = max_shape[..., :2].type_as(priors)

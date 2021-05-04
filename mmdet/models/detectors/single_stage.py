@@ -122,6 +122,10 @@ class SingleStageDetector(BaseDetector):
         if torch.onnx.is_in_onnx_export():
             return bbox_list
 
+        # bbox_results = [
+        #     [bbox2result(det_bboxes, det_labels, self.bbox_head.num_classes)[0]]
+        #     for det_bboxes, det_labels in bbox_list
+        # ]
         bbox_results = [
             bbox2result(det_bboxes, det_labels, self.bbox_head.num_classes)
             for det_bboxes, det_labels in bbox_list

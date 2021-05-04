@@ -36,6 +36,14 @@ from mmdet.core import (anchor_inside_flags, build_anchor_generator,
 
 from collections import OrderedDict
 import torch.distributed as dist
+from tools.test import single_gpu_test, multi_gpu_test
+from mean_ap import eval_map
+from ensemble import ensembleDetections
+import asyncio
+from mmdet.utils.contextmanagers import concurrent
+from mmcv.runner import get_dist_info, init_dist
+import os
+
 
 def init_detector(config, checkpoint=None, device='cuda:0', cfg_options=None):
     """Initialize a detector from config file.
@@ -128,18 +136,6 @@ def inference_detector(model, img, cfg):
     return result, t2
 
 
-config_file = 'saved_models/study/faster_rcnn_r50_fpn_fp16_4x1_3e_1280x1920/faster_rcnn_r50_fpn_fp16_4x1_3e_1280x1920.py'
-checkpoint_file = 'saved_models/study/faster_rcnn_r50_fpn_fp16_4x1_3e_1280x1920/latest.pth'
-device = 'cuda:0'
-# init a detector
-model = init_detector(config_file, checkpoint_file, device='cuda:0')
-cfg = model.cfg
-
-model1 = model
-
-config_file = 'saved_models/study/retinanet_r50_fpn_fp16_4x1_3e_1280x1920/retinanet_r50_fpn_fp16_4x1_3e_1280x1920.py'
-checkpoint_file = 'saved_models/study/retinanet_r50_fpn_fp16_4x1_3e_1280x1920/latest.pth'
-model2 = init_detector(config_file, checkpoint_file, device='cuda:0')
 
 # model = MMDataParallel(model, device_ids=[0])
 
@@ -194,11 +190,11 @@ class Fusion(nn.Module):
         T_out[:, :, :] = -9999.  # TODO: -Infinity value in Half precision
         T_out[:, T_indices[0], T_indices[1]] = x[0, 0, :, :]
 
-        # mp = nn.MaxPool2d([1, 23], 1)
+        mp = nn.MaxPool2d([1000, 1], 1)
         # mp(T_out)
         x = self.maxpool(T_out)
 
-        return x.squeeze()
+        return x.squeeze(), mp(T_out).squeeze()
 
 
 
@@ -215,6 +211,13 @@ class EnsembleModel(nn.Module):
             type='CrossEntropyLoss',
             use_sigmoid=True,
             loss_weight=1.0)
+
+        # loss_cls=dict(
+        #     type='FocalLoss',
+        #     use_sigmoid=True,
+        #     gamma=2.0,
+        #     alpha=0.25,
+        #     loss_weight=1.0)
 
         assigner = dict(
             type='MaxIoUAssigner',
@@ -341,14 +344,18 @@ class EnsembleModel(nn.Module):
         # original implementation uses new_zeros since BG are set to be 0
         # now use empty & fill because BG cat_id = num_classes,
         # FG cat_id = [0, num_classes-1]
+        # labels = pos_bboxes.new_full((num_samples, ),
+        #                              self.num_classes,
+        #                              dtype=torch.long)
         labels = pos_bboxes.new_full((num_samples, ),
-                                     self.num_classes,
+                                     0.,
                                      dtype=torch.long)
         label_weights = pos_bboxes.new_zeros(num_samples)
         bbox_targets = pos_bboxes.new_zeros(num_samples, 4)
         bbox_weights = pos_bboxes.new_zeros(num_samples, 4)
         if num_pos > 0:
-            labels[:num_pos] = pos_gt_labels
+            # TODO: Fix foregound first class
+            labels[:num_pos] = pos_gt_labels + 1.
             # pos_weight = 1.0 if cfg.pos_weight <= 0 else cfg.pos_weight
             pos_weight = 1.0
             label_weights[:num_pos] = pos_weight
@@ -385,6 +392,9 @@ class EnsembleModel(nn.Module):
             return self.forward_test(img, img_metas, **kwargs)
 
 
+    def pred(self, model, img, img_metas, device):
+        img.to('cuda:1')
+        return model([img], [img_metas])
     def forward_train(self,
                       img,
                       img_metas,
@@ -399,16 +409,37 @@ class EnsembleModel(nn.Module):
         # x = self.models[-1](x) # don't use relu for last model
 
         # TODO: Check this
-        with torch.no_grad():
 
-            # torch.backends.cudnn.enabled = False  # This solves the error of using different types of GPU
-            t2 = time()
-            x1 = self.models[0]([img], [img_metas], return_loss=False, rescale=True)
-            # print("Faster:", time() - t2)
-            t2 = time()
-            # img2 = img.to('cuda:1')
-            x2 = self.models[1]([img], [img_metas], return_loss=False, rescale=True)
-            # print("Retina:", time()-t2)
+        # queue is used for concurrent inference of multiple images
+        # streamqueue = asyncio.Queue()
+        # # queue size defines concurrency level
+        # streamqueue_size = 2
+        #
+        # for _ in range(streamqueue_size):
+        #     streamqueue.put_nowait(torch.cuda.Stream(device='cuda:0'))
+
+        # with torch.no_grad():
+        #     async with concurrent(streamqueue):
+        #         # torch.backends.cudnn.enabled = False  # This solves the error of using different types of GPU
+        #         t2 = time()
+        #         x1 = self.models[0]([img], [img_metas], return_loss=False, rescale=True)
+        #         # print("Faster:", time() - t2)
+        #         t2 = time()
+        #         # img2 = img.to('cuda:1')
+        #         x2 = self.models[1]([img], [img_metas], return_loss=False, rescale=True)
+        #         # print("Retina:", time()-t2)
+
+        with torch.no_grad():
+                torch.backends.cudnn.enabled = False  # This solves the error of using different types of GPU
+                t2 = time()
+                x1 = self.models[0]([img], [img_metas], return_loss=False, rescale=True)
+                # print("Faster:", time() - t2)
+                t2 = time()
+                # s = torch.cuda.Stream()
+                # with torch.cuda.stream(s):
+                #     img2 = img.to('cuda:1')
+                x2 = self.models[1]([img], [img_metas], return_loss=False, rescale=True)
+                # print("Retina:", time()-t2)
         # o = [[np.concatenate(r_c) for r_c in zip(*r_img)] for r_img in zip(x1, x2)]
         #
         # o_cars = torch.tensor(o[0][0], dtype=torch.float16).cuda()
@@ -461,13 +492,14 @@ class EnsembleModel(nn.Module):
         # print("Tensor preparation:", time() - t)
 
         t2 = time()
-        new_scores = self.fusion(non_empty_elements_T, T_out, non_empty_indices)
+        new_scores1, new_scores2 = self.fusion(non_empty_elements_T, T_out, non_empty_indices)
         # print("Fusion:", time() - t2)
-
+        new_scores = torch.cat((new_scores1, new_scores2))
         # TODO: Uncomment
         # x1[0][0][:, 4] = new_scores.cpu().detach().numpy()
 
-        bboxes = x1     # [# images, #n_classes, # n_boxes]
+        bboxes = x1 # [# images, #n_classes, # n_boxes]
+        bboxes[0][0] = np.concatenate((x1[0][0], x2[0][0]))
         losses = dict()
 
         # assign_result = [self.assigner.assign(
@@ -476,6 +508,14 @@ class EnsembleModel(nn.Module):
         # sampling_result = self.sampler.sample(assign_result, anchors,
         #
         #                                       gt_bboxes)
+        #
+
+        # Filter GT bboxes of class 0 (vehicles)
+        gt_bboxes_old = gt_bboxes
+        gt_labels_old = gt_labels
+        gt_bboxes = [bb[gt_labels[i]==0]  for i,bb in enumerate(gt_bboxes)]
+        gt_labels = [lab[lab==0] for lab in gt_labels]
+
         t2 = time()
         num_imgs = len(img_metas)
         if gt_bboxes_ignore is None:
@@ -488,7 +528,7 @@ class EnsembleModel(nn.Module):
             sampling_result = self.sampler.sample(
                 assign_result,
                 torch.tensor(bboxes[i][0]).cuda(),
-                gt_bboxes[i],)
+                gt_bboxes[i])
                 # gt_labels[i])
             sampling_results.append(sampling_result)
 
@@ -497,9 +537,34 @@ class EnsembleModel(nn.Module):
                                    gt_labels, rcnn_train_cfg=None)
 
         # cls_score = torch.tensor(1 - x1[0][0][:, 4], requires_grad=True).cuda()
-        cls_score = 1 - new_scores
+        # cls_score = 1 - new_scores
+        m = nn.Sigmoid()
+        cls_score = new_scores
         loss_bbox = self.loss(cls_score, *bbox_targets)
         losses.update(loss_bbox)
+
+        loss_prev = nn.functional.binary_cross_entropy(torch.tensor(x1[0][0][:, 4]).cuda(), bbox_targets[0].float(), reduction='mean')
+        loss_new = nn.functional.binary_cross_entropy_with_logits(cls_score, bbox_targets[0].float(), reduction='mean')
+
+        img_meta = img_metas[0]
+        image = img[0].cpu().detach()
+        image = image.permute((1, 2, 0))
+
+        mean = img_meta['img_norm_cfg']['mean']
+        std = img_meta['img_norm_cfg']['std']
+        image = mmcv.imdenormalize(image.numpy(), mean, std, False)
+        image = image.astype(np.uint8)
+
+        from mmdet.core.visualization.image import imshow_det_bboxes
+        # imshow_det_bboxes(image, bboxes[0][0][-2:], np.zeros(2, dtype=np.int))
+        gts = gt_bboxes[0].detach().cpu().numpy()
+        labs = gt_labels[0].detach().cpu().numpy()
+        # print()
+        # imshow_det_bboxes(image, gts, labs)
+
+        # p = next(model.parameters()).clone()
+        # print(torch.all(torch.eq(next(model.parameters()), p)))
+        # print(p[0][0])
         # print("Loss Assigner:", time() - t2)
 
         # loss_cls = dict(
@@ -584,6 +649,7 @@ class EnsembleModel(nn.Module):
 
         return loss, log_vars
 
+    @auto_fp16(apply_to=('img', ))
     def forward_test(self, img, img_metas, proposals=None, rescale=False):
         # for model in self.models[:-1]:
         #     x = F.relu(model(x))
@@ -598,7 +664,11 @@ class EnsembleModel(nn.Module):
             print(time()-t2)
         o = [[np.concatenate(r_c) for r_c in zip(*r_img)] for r_img in zip(x1, x2)]
 
-        o_cars = torch.tensor(o[0][0], dtype=torch.float32).cuda()
+        x1[0][0] = x1[0][0][x1[0][0][:, 4].argsort()][::-1][:1000].copy()
+        x2[0][0] = x2[0][0][x2[0][0][:, 4].argsort()][::-1][:1000].copy()
+
+
+        o_cars = torch.tensor(o[0][0], dtype=torch.float16).cuda()
         print()
 
         ## TODO: Add center distance
@@ -617,7 +687,7 @@ class EnsembleModel(nn.Module):
         T[:, :, 1] = scores_1
         T[:, :, 2] = scores_2
 
-        T = torch.tensor(T).cuda()
+        T = torch.tensor(T).cuda().half()
         non_empty_indices = torch.nonzero(T[:, :, 0])
         non_empty_indices = torch.nonzero(T[:, :, 0], as_tuple=True)
 
@@ -629,11 +699,16 @@ class EnsembleModel(nn.Module):
         non_empty_elements_T = non_empty_elements.permute(1, 0)
         non_empty_elements_T = non_empty_elements_T.unsqueeze(1).unsqueeze(0).cuda()    # Shape [1,3,1, #non-zero]
 
-        T_out = torch.zeros((1, K, N)).cuda()
+        T_out = torch.zeros((1, K, N)).cuda().half()
 
-        new_scores = self.fusion(non_empty_elements_T, T_out, non_empty_indices)
-        x1[0][0][:, 4] = new_scores.cpu()
+        new_scores1, new_scores2 = self.fusion(non_empty_elements_T, T_out, non_empty_indices)
 
+        m = nn.Sigmoid()
+        new_scores1 = m(new_scores1)
+        new_scores2 = m(new_scores2)
+        x1[0][0][:, 4] = new_scores1.cpu()
+        x2[0][0][:, 4] = new_scores2.cpu()
+        x1[0][0] = np.concatenate((x1[0][0], x2[0][0]))
 
         # print(time()-t)
         # for k in o_cars[0]:
@@ -656,8 +731,8 @@ class EnsembleModel(nn.Module):
         # [torch.cat(r_c)  for r_c in zip(r_img)   for r_img in zip(x1,x2)]
         # r = torch.cat([x1, x2])
 
-        return o, x1
-
+        # return o, x1
+        return x1
 
     def train_step(self, data, optimizer):
         """The iteration step during training.
@@ -694,125 +769,124 @@ class EnsembleModel(nn.Module):
 
         return outputs
 
-def _parse_losses(losses):
-    """Parse the raw outputs (losses) of the network.
-
-    Args:
-        losses (dict): Raw output of the network, which usually contain
-            losses and other necessary infomation.
-
-    Returns:
-        tuple[Tensor, dict]: (loss, log_vars), loss is the loss tensor \
-            which may be a weighted sum of all losses, log_vars contains \
-            all the variables to be sent to the logger.
-    """
-    log_vars = OrderedDict()
-    for loss_name, loss_value in losses.items():
-        if isinstance(loss_value, torch.Tensor):
-            log_vars[loss_name] = loss_value.mean()
-        elif isinstance(loss_value, list):
-            log_vars[loss_name] = sum(_loss.mean() for _loss in loss_value)
-        else:
-            raise TypeError(
-                f'{loss_name} is not a tensor or list of tensors')
-
-    loss = sum(_value for _key, _value in log_vars.items()
-               if 'loss' in _key)
-
-    log_vars['loss'] = loss
-    for loss_name, loss_value in log_vars.items():
-        # reduce loss when distributed training
-        if dist.is_available() and dist.is_initialized():
-            loss_value = loss_value.data.clone()
-            dist.all_reduce(loss_value.div_(dist.get_world_size()))
-        log_vars[loss_name] = loss_value.item()
-
-    return loss, log_vars
 
 
-# TODO: Put model on GPU
-model = EnsembleModel([model1, model2])
-model = MMDataParallel(model, device_ids=[0]) # Esto mete el modelo Ensemble en la GPU
-# model = MMDistributedDataParallel(
-#     model.cuda(),
-#     device_ids=[torch.cuda.current_device()],
-#     broadcast_buffers=False)
+def init_processes(rank, world_size, fn, batch_size, backend='gloo'):
+    import os
+    os.environ['MASTER_ADDR'] = '10.0.3.29'
+    os.environ['MASTER_PORT'] = '9901'
+    os.environ['CUDA_VISIBLE_DEVICES'] = '0,1'
+    os.environ['NCCL_DEBUG'] = 'INFO'
+    os.environ['GLOO_SOCKET_IFNAME'] = 'enp0s31f6'
+    dist.init_process_group(backend=backend, world_size=world_size, rank=rank, init_method="env://")
+    fn(rank, batch_size, world_size)
 
-cfg.seed = None
 
+if __name__ == '__main__':
+    # os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+
+    config_file = 'saved_models/study/faster_rcnn_r50_fpn_fp16_4x1_3e_1280x1920/faster_rcnn_r50_fpn_fp16_4x1_3e_1280x1920.py'
+    # checkpoint_file = 'saved_models/study/faster_rcnn_r50_fpn_fp16_4x1_3e_1280x1920/latest.pth'
+    checkpoint_file = 'saved_models/study/faster_rcnn_r50_fpn_fp16_4x2_1x_1280x1920/latest.pth'
+
+    device = 'cuda:1'
+
+    # init a detector
+    model = init_detector(config_file, checkpoint_file, device='cuda:0')
+    cfg = model.cfg
+
+    model1 = model
+
+    config_file = 'saved_models/study/retinanet_r50_fpn_fp16_4x1_3e_1280x1920/retinanet_r50_fpn_fp16_4x1_3e_1280x1920.py'
+    checkpoint_file = 'saved_models/study/retinanet_r50_fpn_fp16_4x1_3e_1280x1920/latest.pth'
+    # config_file = 'saved_models/study/cascade_rcnn_r50_fpn_fp16_2x1_3e_1280x1920/cascade_rcnn_r50_fpn_fp16_2x1_3e_1280x1920.py'
+    # checkpoint_file = 'saved_models/study/cascade_rcnn_r50_fpn_fp16_2x1_3e_1280x1920/latest.pth'
+    model2 = init_detector(config_file, checkpoint_file, device='cuda:0')
+
+    model = EnsembleModel([model1, model2])
+    model = MMDataParallel(model, device_ids=[0]) # Esto mete el modelo Ensemble en la GPU
+    cfg.seed = None
+
+    model.load_state_dict(torch.load("ensemble2.pth"))
+
+    # l = torch.load("ensemble.pth")
+    # for key in list(l.keys()):
+    #     print("module."+key)
+    #     l["module."+key] = l.pop(key)
 
 
 
-# model.eval()
 
-dataset = build_dataset(cfg.data.train)
-batch = 1
-# train_detector(model, dataset, cfg)
-data_loader = build_dataloader(
-        dataset,
-        samples_per_gpu=batch,
-        workers_per_gpu=cfg.data.workers_per_gpu,
-        dist=True,
-        shuffle=False)
+    # model.eval()
+    cfg.data.test.test_mode = True  #To avoid filtering out images without gts
 
-d = next(iter(data_loader))
-optimizer = torch.optim.SGD(model.parameters(), lr=0.001, momentum=0.9, weight_decay=0.0001)
-for i in range(10):
-        optimizer.zero_grad()
-        t2 = time()
-        loss = model(**d)
-        loss, log_vars = _parse_losses(loss)
-        loss.backward()
-        optimizer.step()
-        if i!=0:
-            print(torch.all(torch.eq(next(model.parameters()),p)))
-        n, p = next(model.named_parameters())
-        print(time()-t2)
+    dataset = build_dataset(cfg.data.train)
+    batch = 1
+    # train_detector(model, dataset, cfg)
+
+    # torch.save(model.state_dict(), "ensemble_fusion.pth")
+
+    dataset = build_dataset(cfg.data.test)
+
+    data_loader = build_dataloader(
+            dataset,
+            samples_per_gpu=batch,
+            workers_per_gpu=cfg.data.workers_per_gpu,
+            dist=True,
+            shuffle=False)
 
 
+    res = single_gpu_test(model, data_loader)
+    # res = mmcv.load("ensemble_res.pkl")
+    original_res = mmcv.load("saved_models/study/faster_rcnn_r50_fpn_fp16_4x1_3e_1280x1920/results_sample.pkl")
 
-# for i, data in enumerate(data_loader):
-#     y_pred = model(data)
-# d = next(iter(data_loader))
-# model(d)
+    anns = [dataset.get_ann_info(n) for n in range(len(res))]
+    mean_ap, eval_results, df_summary = eval_map(res, anns, nproc=4, model_name="Ensemble")
 
 
-times = []
-for i, data in enumerate(data_loader):
-    with torch.no_grad():
-        # d, t = inference_detector(model, "data/waymococo_f0/val2020/val_00000_00000_camera1.jpg", cfg)
-        t2 = time()
-        # result = model(**data, return_loss=False)
-        result = model(**data)
-        t = time()-t2
-        print(time()-t2)
-        print()
-        # print(t)
-        if i>5:
-            times.append(t)
+    for i in range(len(res)):
+        res[i][0] = res[i][0][res[i][0][:, 4] > 0.05]
+        res[i][1] = res[i][1][res[i][1][:, 4] > 0.05]
+        res[i][2] = res[i][2][res[i][2][:, 4] > 0.05]
 
-    # break
-    if i == 500:
-        break
-#
-# inference the demo image
+    cfg = {'type': 'nms', 'iou_threshold': 0.5}
+    res = [ensembleDetections([dets], cfg) for dets in res]
 
-# times = []
-# for i, data in enumerate(data_loader):
-# # for i in range(200):
-#     with torch.no_grad():
-#         # d, t = inference_detector(model, "data/waymococo_f0/val2020/val_00000_00000_camera1.jpg", cfg)
-#         t2 = time()
-#         result = model(return_loss=False, rescale=True, **data)
-#         t = time()-t2
-#         print(time()-t2)
-#         # print(t)
-#         if i>5:
-#             times.append(t)
-#
-#     if i == 100:
-#         break
-#
-# # show_result_pyplot(model, "data/waymococo_f0/val2020/val_00000_00000_camera1.jpg", d)
-# print(len(times)*batch/np.sum(times))
-# print(np.sum(times))
+    for i in range(len(res)):
+        res[i][0] = res[i][0][:100]
+        res[i][1] = res[i][1][:100]
+        res[i][2] = res[i][2][:100]
+
+
+    mmcv.dump(res, "results_fusing.pkl")
+    mean_ap, eval_results, df_summary = eval_map(res, anns, nproc=4, model_name="Ensemble")
+
+
+
+
+    # mean_ap, eval_results, df_summary = eval_map(original_res, anns, nproc=4, model_name="Ensemble")
+
+
+
+
+    # for i in range(len(res)):
+    #     res[i][0] = res[i][0][res[i][0][:, 4] > 0.05]
+    #     res[i][1] = res[i][1][res[i][1][:, 4] > 0.05]
+    #     res[i][2] = res[i][2][res[i][2][:, 4] > 0.05]
+    #
+    # mean_ap, eval_results, df_summary = eval_map(res, anns, nproc=4, model_name="Ensemble")
+    #
+    #
+    #
+    # cfg = {'type': 'nms', 'iou_threshold': 0.7}
+    # nms = [ensembleDetections([dets], cfg) for dets in res]
+    # mean_ap, eval_results, df_summary = eval_map(nms, anns, nproc=4, model_name="Ensemble")
+
+    # nms_sc = nms
+    # for i in range(len(nms_sc)):
+    #     nms_sc[i][0] = nms_sc[i][0][nms_sc[i][0][:,4] > 0.05]
+    #     nms_sc[i][1] = nms_sc[i][1][nms_sc[i][1][:,4] > 0.05]
+    #     nms_sc[i][2] = nms_sc[i][2][nms_sc[i][2][:,4] > 0.05]
+    #
+    # mean_ap, eval_results, df_summary = eval_map(nms_sc, anns, nproc=4, model_name="Ensemble")
+

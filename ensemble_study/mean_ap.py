@@ -48,7 +48,7 @@ def average_precision(recalls, precisions, mode='area'):
                 precs = precisions[i, recalls[i, :] >= thr]
                 prec = precs.max() if precs.size > 0 else 0
                 ap[i] += prec
-        ap /= 11
+            ap /= 11
     else:
         raise ValueError(
             'Unrecognized mode, only "area" and "11points" are supported')
@@ -370,7 +370,7 @@ def eval_map(det_results,
 
     pool = Pool(nproc)
     eval_results = []
-    for i in range(num_classes):
+    for i in range(1):
         iou_thr_c = iou_thr if i!=0 else 0.7
         # get gt and det bboxes of this class
         cls_dets, cls_gts, cls_gts_ignore = get_cls_results(
@@ -472,7 +472,7 @@ def eval_map(det_results,
     df_summary = print_map_summary(
         mean_ap, eval_results, dataset, area_ranges, logger=logger, model_name=model_name)
 
-    return mean_ap, eval_results, df_summary
+    return mean_ap, eval_results, df_summary, recalls, precisions
 
 
 def print_map_summary(mean_ap,
@@ -527,6 +527,9 @@ def print_map_summary(mean_ap,
     if not isinstance(mean_ap, list):
         mean_ap = [mean_ap]
 
+
+    # TODO: Remove
+    num_classes=1
     header = ['class', 'gts', 'dets', 'recall', 'ap', 'TP', 'FP', 'FPRed', 'FN']
     for i in range(num_scales):
         if scale_ranges is not None:
@@ -542,19 +545,19 @@ def print_map_summary(mean_ap,
                 tps, fps, fps_red, num_gts[i, j] - tps
             ]
             table_data.append(row_data)
-        table_data.append(['All', np.sum(num_gts), sum(t[2] for t in table_data[1:4]),
-                           np.mean([float(t[3]) for t in table_data[1:4]]).round(3),
-                           np.float32(mean_ap[i]).round(3),
-                           sum(t[5] for t in table_data[1:4]),
-                           sum(t[6] for t in table_data[1:4]),
-                           sum(t[7] for t in table_data[1:4]),
-                           sum(t[8] for t in table_data[1:4])
-                           ])
+        # table_data.append(['All', np.sum(num_gts), sum(t[2] for t in table_data[1:4]),
+        #                    np.mean([float(t[3]) for t in table_data[1:4]]).round(3),
+        #                    np.float32(mean_ap[i]).round(3),
+        #                    sum(t[5] for t in table_data[1:4]),
+        #                    sum(t[6] for t in table_data[1:4]),
+        #                    sum(t[7] for t in table_data[1:4]),
+        #                    sum(t[8] for t in table_data[1:4])
+        #                    ])
         table = AsciiTable(table_data)
         table.inner_footing_row_border = True
         print_log('\n' + table.table, logger=logger)
 
         df_summary = pd.DataFrame(table_data[1:], columns=header)
-        df_summary["model_name"] = [model_name for _ in range(4)]
+        df_summary["model_name"] = [model_name for _ in range(1)]
         df_summary = df_summary.set_index('model_name')
         return df_summary

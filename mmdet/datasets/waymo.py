@@ -706,4 +706,5 @@ class WaymoOpenDataset(CustomDataset):
         if tmp_dir is not None:
             tmp_dir.cleanup()
 
-        return eval_results, waymo_iou_metrics
+        return eval_results
+        # return eval_results, waymo_iou_metrics

@@ -109,7 +109,7 @@ def stats_results(models, filt_scores=[0], training_results=False, output='stat_
                   dataset_config='configs/_base_/datasets/waymo_detection_1280x1920.py', full_stats=False):
     list_eval_results = []
 
-    resFiles = ["saved_models/study/{}/results.pkl".format(model) for model in models]
+    resFiles = ["saved_models/study/{}/results_sample.pkl".format(model) for model in models]
 
     cfg = Config.fromfile(dataset_config)
     cfg.data.test.test_mode = True  # To avoid filtering out images without gts

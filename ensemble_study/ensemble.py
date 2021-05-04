@@ -102,7 +102,7 @@ if __name__ == "__main__":
     ensemble_dets = [ensembleDetections(dets, cfg) for dets in combined_dets]
     # time = [n[1] for n in nms_output]
     # print(np.mean(time))
-    # res = dataset.evaluate(ensemble_dets)
+    # res = dataset.evaluate(ensemble_dets, waymo_metrics=True)
     print()
 
     for i in range(len(ensemble_dets)):

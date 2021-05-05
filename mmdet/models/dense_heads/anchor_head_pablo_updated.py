@@ -96,12 +96,30 @@ class AnchorHead(BaseDenseHead, BBoxTestMixin):
         self.fp16_enabled = False
 
         self.anchor_generator = build_anchor_generator(anchor_generator)
+
+        # self.anchor_generator = build_anchor_generator(dict(
+        #     type='AnchorGenerator',
+        #     scales=torch.tensor([8.]).cuda(),
+        #     ratios=self.ratios,
+        #     strides=self.scales.clone().cpu().detach().numpy(),
+        #     base_sizes=self.scales
+        #     )
+        # )
+
         # usually the numbers of anchors for each level are the same
         # except SSD detectors
         self.num_anchors = self.anchor_generator.num_base_anchors[0]
 
-        self.scales = nn.Parameter(torch.tensor(self.anchor_generator.base_sizes, dtype=torch.float32, requires_grad=True))
-        self.ratios = nn.Parameter(torch.tensor(self.anchor_generator.ratios, dtype=torch.float32, requires_grad=True))
+        self.scales = nn.Parameter(torch.tensor(
+                self.anchor_generator.base_sizes,
+                dtype=torch.float32,
+                requires_grad=True
+            ).log()) # Scales and ratios are log-transformed
+        self.ratios = nn.Parameter(torch.tensor(
+                self.anchor_generator.ratios,
+                dtype=torch.float32,
+                requires_grad=True
+            ).log())
 
         self._init_layers()
 
@@ -156,9 +174,8 @@ class AnchorHead(BaseDenseHead, BBoxTestMixin):
             log += "<RATIOS GRAD>" + str(self.ratios.grad.cpu().detach().numpy()) + " "
             log += "<SCALES GRAD>" + str(self.scales.grad.cpu().detach().numpy()) + "\n"
 
-            f = open(f"log_pablo/anchors_log_{self.dateAndTime}.txt", "a+")
-            f.write(log)
-            f.close()
+            with open(f"log_pablo/anchors_log_{self.dateAndTime}.txt", "a+") as f:
+                f.write(log)
 
             # print(
             #     "<RATIOS>", self.ratios.clone().cpu().detach().numpy(),
@@ -191,6 +208,7 @@ class AnchorHead(BaseDenseHead, BBoxTestMixin):
             )
         )
 
+        # Write in log file
         self.log_anchors()
         self.log_count += 1
 

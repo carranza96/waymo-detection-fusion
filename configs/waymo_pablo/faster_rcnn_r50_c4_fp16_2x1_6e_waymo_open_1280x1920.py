@@ -93,7 +93,7 @@ runner = dict(type='EpochBasedRunner', max_epochs=6)
 
 # load_from = 'https://s3.ap-northeast-2.amazonaws.com/open-mmlab/mmdetection/models/faster_rcnn_r50_c4_2x-6e4fdf4f.pth'
 # load_from = 'https://s3.ap-northeast-2.amazonaws.com/open-mmlab/mmdetection/models/faster_rcnn_r50_caffe_c4_2x-71c67f27.pth'
-load_from = 'saved_models/faster_rcnn_r50_caffe_c4_2x-71c67f27_mod.pth'
+load_from = 'saved_models/pretrained/faster_rcnn_r50_caffe_c4_2x-71c67f27_mod.pth'
 
 # fp16 settings
 fp16 = dict(loss_scale=512.)

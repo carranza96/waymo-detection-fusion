@@ -538,13 +538,13 @@ def print_map_summary(mean_ap,
             fps_red = int(sum([np.sum(fps) for fps in results[j]['fp_redundant']]))
             row_data = [
                 label_names[j], num_gts[i, j], results[j]['num_dets'],
-                f'{recalls[i, j]:.3f}', f'{aps[i, j]:.3f}',
+                f'{recalls[i, j]*100:.2f}', f'{aps[i, j]*100:.2f}',
                 tps, fps, fps_red, num_gts[i, j] - tps
             ]
             table_data.append(row_data)
         table_data.append(['All', np.sum(num_gts), sum(t[2] for t in table_data[1:4]),
-                           np.mean([float(t[3]) for t in table_data[1:4]]).round(3),
-                           np.float32(mean_ap[i]).round(3),
+                           np.mean([float(t[3]) for t in table_data[1:4]]).round(2),
+                           np.float32(mean_ap[i]*100).round(2),
                            sum(t[5] for t in table_data[1:4]),
                            sum(t[6] for t in table_data[1:4]),
                            sum(t[7] for t in table_data[1:4]),

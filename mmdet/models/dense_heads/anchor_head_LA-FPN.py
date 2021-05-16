@@ -1,3 +1,5 @@
+# anchor_head_LA-FPN.py
+
 import torch
 import torch.nn as nn
 from mmcv.runner import force_fp32

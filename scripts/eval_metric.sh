@@ -1,4 +1,4 @@
-MODEL=faster_rcnn_r50_fpn_fp16_8x1_1x_waymo_open_f0
+MODEL=study/yolof_r50_c5_fp16_4x2_1x_1280x1920
 
 
 # Format-only
@@ -8,15 +8,15 @@ MODEL=faster_rcnn_r50_fpn_fp16_8x1_1x_waymo_open_f0
 
 
 # Eval
-python tools/analysis_tools/eval_metric.py configs/waymo_open/${MODEL}.py \
-saved_models/${MODEL}/results.pkl \
---eval bbox \
---eval-options "classwise=True" "outfile_prefix=saved_models/"${MODEL}/"predictions_waymo"
+#python tools/analysis_tools/eval_metric.py configs/waymo_open/${MODEL}.py \
+#saved_models/${MODEL}/results.pkl \
+#--eval bbox \
+#--eval-options "classwise=True" "outfile_prefix=saved_models/"${MODEL}/"predictions_waymo"
 #
 #
 #
-PREDICTIONS_FILE=saved_models/${MODEL}/predictions_waymo.bin
-GTS_FILE=saved_models/${MODEL}/predictions_waymo_gt.bin
+PREDICTIONS_FILE=saved_models/${MODEL}/predictions_waymo_full_val.bin
+GTS_FILE=saved_models/${MODEL}/predictions_waymo_full_val_gt.bin
 METRICS_FILE=saved_models/${MODEL}/metrics.csv
 #
 cd waymo-open-dataset

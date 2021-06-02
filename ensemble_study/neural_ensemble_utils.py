@@ -10,17 +10,30 @@ from ensemble import ensembleDetections
 def init_base_models(base_models_names):
     base_models = []
     for m in base_models_names:
-        config_file = 'saved_models/study/{}/{}.py'.format(m,m)
+        config_file = 'saved_models/study/{}/{}.py'.format(m, m)
+        config = mmcv.Config.fromfile(config_file)
+
+        # Disable NMS and thresholds of base models
+        if 'rcnn' in config.model.test_cfg.keys():
+            config.model.test_cfg.rcnn.score_thr = 0.0
+            config.model.test_cfg.rcnn.max_per_img = -1
+            config.model.test_cfg.rcnn.nms = None
+        else:
+            config.model.test_cfg.score_thr = 0.0
+            config.model.test_cfg.max_per_img = -1
+            config.model.test_cfg.nms = None
+
+
         checkpoint_file = 'saved_models/study/{}/latest.pth'.format(m)
-        bm = init_detector(config_file, checkpoint_file, device='cuda:0')
+        bm = init_detector(config, checkpoint_file, device='cuda:0')
         base_models.append(bm)
     return base_models
 
 
-def load_saved_preds_base_models(base_models_names):
+def load_saved_preds_base_models(base_models_names, file_name):
     saved_preds = []
     for m in base_models_names:
-        sp = mmcv.load("saved_models/study/{}/results_training_all.pkl".format(m))
+        sp = mmcv.load("saved_models/study/{}/{}".format(m,file_name))
         saved_preds.append(sp)
     return saved_preds
 
@@ -77,15 +90,17 @@ def single_gpu_test_two_outputs(model,
             prog_bar.update()
     return results, results2
 
+
 def postprocess_detections(res, score_th, nms_cfg, max_dets_class):
     for i in range(len(res)):
-        res[i][0] = res[i][0][res[i][0][:, 4] > score_th]
-        res[i][1] = res[i][1][res[i][1][:, 4] > score_th]
-        res[i][2] = res[i][2][res[i][2][:, 4] > score_th]
+        for j in range(len(res[i])):
+            res[i][j] = res[i][j][res[i][j][:, 4] > score_th]
+
 
     res = [ensembleDetections([dets], nms_cfg) for dets in res]
 
     for i in range(len(res)):
-        res[i][0] = res[i][0][:max_dets_class]
-        res[i][1] = res[i][1][:max_dets_class]
-        res[i][2] = res[i][2][:max_dets_class]
+        for j in range(len(res[i])):
+            res[i][j] = res[i][j][:max_dets_class]
+
+    return res

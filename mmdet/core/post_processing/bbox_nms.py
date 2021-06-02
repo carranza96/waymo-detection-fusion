@@ -81,10 +81,11 @@ def multiclass_nms(multi_bboxes,
         else:
             return bboxes, labels
 
-    # dets, keep = batched_nms(bboxes, scores, labels, nms_cfg)
-    # TODO: Set this in the config
-    keep = torch.arange(scores.shape[0])
-    dets = torch.cat((bboxes[keep], scores[keep].reshape(-1, 1)), dim=1)
+    if nms_cfg:
+        dets, keep = batched_nms(bboxes, scores, labels, nms_cfg)
+    else:
+        keep = torch.arange(scores.shape[0])
+        dets = torch.cat((bboxes[keep], scores[keep].reshape(-1, 1)), dim=1)
 
     if max_num > 0:
         dets = dets[:max_num]

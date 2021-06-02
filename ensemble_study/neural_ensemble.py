@@ -1,13 +1,31 @@
+import numpy as np
+import torch
+import torch.distributed as dist
 from torch import nn
-from torch.nn import  Sequential
+from torch.nn import Sequential
+import mmcv
+from mmcv.runner import auto_fp16, force_fp32
+from mmdet.models.losses import accuracy
+from mmdet.models.builder import build_loss
+from mmdet.core import (build_assigner, build_sampler, multi_apply)
+from mmdet.core.bbox.iou_calculators import bbox_overlaps
+from mmdet.core.bbox.transforms import bbox_xyxy_to_cxcywh
+from mmdet.core.visualization.image import imshow_det_bboxes
+from collections import OrderedDict
+from time import time
+from copy import deepcopy
+from ensemble import ensembleDetections
+from neural_ensemble_utils import postprocess_detections
+import wandb
+import matplotlib.pyplot as plt
 
 class Fusion(nn.Module):
     def __init__(self):
         super(Fusion, self).__init__()
         self.name = 'fusion_layer'
 
-        self.fuse_2d_3d = Sequential(
-            nn.Conv2d(7, 18, 1),
+        self.fuse = Sequential(
+            nn.Conv2d(9, 18, 1),
             nn.ReLU(),
             nn.Conv2d(18, 36, 1),
             nn.ReLU(),
@@ -19,18 +37,11 @@ class Fusion(nn.Module):
             nn.MaxPool2d([1, 1000], 1),
         )
         self.maxpool2 = Sequential(
-            nn.MaxPool2d([1000, 1], 1),
+            nn.MaxPool2d([2000, 1], 1),
         )
 
 
-    def forward(self, input_1, T_out, T_indices):
-        # flag = -1
-        # if tensor_index[0, 0] == -1:
-        #     out_1 = torch.zeros(1,200,70400,dtype = input_1.dtype,device = input_1.device)
-        #     out_1[:,:,:] = -9999999
-        #     flag = 0
-        # else:
-        #     x = self.fuse_2d_3d(input_1)
+    def forward(self, input, T_out, T_indices):
         #     out_1 = torch.zeros(1,200,70400,dtype = input_1.dtype,device = input_1.device)
         #     out_1[:,:,:] = -9999999
         #     out_1[:,tensor_index[:,0],tensor_index[:,1]] = x[0,:,0,:]
@@ -40,13 +51,11 @@ class Fusion(nn.Module):
         # x = x.squeeze().reshape(1,-1,1)
         # return x, flag
 
-        x = self.fuse_2d_3d(input_1)
+        x = self.fuse(input)
 
-        T_out[:, :, :] = -9999.  # TODO: -Infinity value in Half precision
+        T_out[:, :, :] = -9999.
         T_out[:, T_indices[0], T_indices[1]] = x[0, 0, :, :]
 
-        mp = nn.MaxPool2d([1000, 1], 1)
-        # mp(T_out)
         x = self.maxpool(T_out)
         x2 = self.maxpool2(T_out)
         return x.squeeze(), x2.squeeze()
@@ -55,11 +64,17 @@ class Fusion(nn.Module):
 
 class EnsembleModel(nn.Module):
 
-    def __init__(self, models):
+    def __init__(self, models, n_dets1=2000, n_dets2=1000, log_wandb=False):
         super(EnsembleModel, self).__init__()
         self.models = models
-        # TODO: Fix half()
-        self.fusion = Fusion().half()
+        self.fusion = Fusion()
+
+        self.fusion.maxpool = Sequential(
+            nn.MaxPool2d([1, n_dets2], 1),
+        )
+        self.fusion.maxpool2 = Sequential(
+            nn.MaxPool2d([n_dets1, 1], 1),
+        )
 
         self.num_classes = 1
         loss_cls = dict(
@@ -88,7 +103,41 @@ class EnsembleModel(nn.Module):
         sampler_cfg = dict(type='PseudoSampler')
         self.sampler = build_sampler(sampler_cfg)
 
+        self.saved_preds = None
+        self.n_dets1 = n_dets1
+        self.n_dets2 = n_dets2
+        self.log_wandb = log_wandb
 
+    # TODO: Import from cross_entropy_loss.py
+    def _expand_onehot_labels(self, labels, label_weights, label_channels):
+        bin_labels = labels.new_full((labels.size(0), label_channels), 0)
+        inds = torch.nonzero(
+            (labels >= 0) & (labels < label_channels), as_tuple=False).squeeze()
+        if inds.numel() > 0:
+            bin_labels[inds, labels[inds]] = 1
+
+        if label_weights is None:
+            bin_label_weights = None
+        else:
+            bin_label_weights = label_weights.view(-1, 1).expand(
+                label_weights.size(0), label_channels)
+
+        return bin_labels, bin_label_weights
+
+    def get_image(self, img, img_metas):
+
+        img_meta = img_metas[0]
+        image = img[0].cpu().detach()
+        image = image.permute((1, 2, 0))
+
+        mean = img_meta['img_norm_cfg']['mean']
+        std = img_meta['img_norm_cfg']['std']
+        image = mmcv.imdenormalize(image.numpy(), mean, std, False)
+        image = image.astype(np.uint8)
+
+        return image
+
+    # from mmdet.models.roi_heads.bbox_head.bbox_head
     def get_targets(self,
                     sampling_results,
                     gt_bboxes,
@@ -157,7 +206,6 @@ class EnsembleModel(nn.Module):
             bbox_weights = torch.cat(bbox_weights, 0)
         return labels, label_weights, bbox_targets, bbox_weights
 
-
     def _get_target_single(self, pos_bboxes, neg_bboxes, pos_gt_bboxes,
                            pos_gt_labels, cfg):
         # TODO: Remove train cfg
@@ -199,18 +247,18 @@ class EnsembleModel(nn.Module):
         # original implementation uses new_zeros since BG are set to be 0
         # now use empty & fill because BG cat_id = num_classes,
         # FG cat_id = [0, num_classes-1]
-        # labels = pos_bboxes.new_full((num_samples, ),
-        #                              self.num_classes,
-        #                              dtype=torch.long)
         labels = pos_bboxes.new_full((num_samples, ),
-                                     0.,
+                                     self.num_classes,
                                      dtype=torch.long)
+        # labels = pos_bboxes.new_full((num_samples, ),
+        #                              0.,
+        #                              dtype=torch.long)
         label_weights = pos_bboxes.new_zeros(num_samples)
         bbox_targets = pos_bboxes.new_zeros(num_samples, 4)
         bbox_weights = pos_bboxes.new_zeros(num_samples, 4)
         if num_pos > 0:
             # TODO: Fix foregound first class
-            labels[:num_pos] = pos_gt_labels + 1.
+            labels[:num_pos] = pos_gt_labels # + 1.
             # pos_weight = 1.0 if cfg.pos_weight <= 0 else cfg.pos_weight
             pos_weight = 1.0
             label_weights[:num_pos] = pos_weight
@@ -230,146 +278,8 @@ class EnsembleModel(nn.Module):
 
         return labels, label_weights, bbox_targets, bbox_weights
 
-    @auto_fp16(apply_to=('img', ))
-    def forward(self, img, img_metas, return_loss=True, **kwargs):
-        """Calls either :func:`forward_train` or :func:`forward_test` depending
-        on whether ``return_loss`` is ``True``.
+    def get_bbox_targets(self, bboxes, gt_bboxes, gt_labels, gt_bboxes_ignore, img_metas):
 
-        Note this setting will change the expected inputs. When
-        ``return_loss=True``, img and img_meta are single-nested (i.e. Tensor
-        and List[dict]), and when ``resturn_loss=False``, img and img_meta
-        should be double nested (i.e.  List[Tensor], List[List[dict]]), with
-        the outer list indicating test time augmentations.
-        """
-        if return_loss:
-            return self.forward_train(img, img_metas, **kwargs)
-        else:
-            return self.forward_test(img, img_metas, **kwargs)
-
-
-    def pred(self, model, img, img_metas, device):
-        img.to('cuda:1')
-        return model([img], [img_metas])
-    def forward_train(self,
-                      img,
-                      img_metas,
-                      gt_bboxes,
-                      gt_labels,
-                      gt_bboxes_ignore=None,
-                      gt_masks=None,
-                      proposals=None,
-                      **kwargs):
-        # for model in self.models[:-1]:
-        #     x = F.relu(model(x))
-        # x = self.models[-1](x) # don't use relu for last model
-
-        # TODO: Check this
-
-        # queue is used for concurrent inference of multiple images
-        # streamqueue = asyncio.Queue()
-        # # queue size defines concurrency level
-        # streamqueue_size = 2
-        #
-        # for _ in range(streamqueue_size):
-        #     streamqueue.put_nowait(torch.cuda.Stream(device='cuda:0'))
-
-        # with torch.no_grad():
-        #     async with concurrent(streamqueue):
-        #         # torch.backends.cudnn.enabled = False  # This solves the error of using different types of GPU
-        #         t2 = time()
-        #         x1 = self.models[0]([img], [img_metas], return_loss=False, rescale=True)
-        #         # print("Faster:", time() - t2)
-        #         t2 = time()
-        #         # img2 = img.to('cuda:1')
-        #         x2 = self.models[1]([img], [img_metas], return_loss=False, rescale=True)
-        #         # print("Retina:", time()-t2)
-
-        with torch.no_grad():
-                torch.backends.cudnn.enabled = False  # This solves the error of using different types of GPU
-                t2 = time()
-                x1 = self.models[0]([img], [img_metas], return_loss=False, rescale=True)
-                # print("Faster:", time() - t2)
-                t2 = time()
-                # s = torch.cuda.Stream()
-                # with torch.cuda.stream(s):
-                #     img2 = img.to('cuda:1')
-                x2 = self.models[1]([img], [img_metas], return_loss=False, rescale=True)
-                # print("Retina:", time()-t2)
-        # o = [[np.concatenate(r_c) for r_c in zip(*r_img)] for r_img in zip(x1, x2)]
-        #
-        # o_cars = torch.tensor(o[0][0], dtype=torch.float16).cuda()
-        # print()
-
-
-        ## TODO: Add center distance
-
-        # TODO: Esta parte (Tensor preparation) es muy lenta
-        t = time()
-        x1[0][0] = x1[0][0][x1[0][0][:, 4].argsort()][::-1][:1000].copy()
-        x2[0][0] = x2[0][0][x2[0][0][:, 4].argsort()][::-1][:1000].copy()
-
-
-        o_cars = [torch.tensor(x1[0][0]), torch.tensor(x2[0][0])]
-        K = x1[0][0].shape[0]
-        N = x2[0][0].shape[0]
-        F = 7
-        T = np.zeros(((K, N, F)), dtype=np.float32)  # TODO: torch.zeros Avoid numpy Float 16
-
-        t = time()
-        overlaps = bbox_overlaps(o_cars[0][:, :4], o_cars[1][:, :4])
-
-        # print("BBox overlaps:", time() - t)
-        scores_1 = o_cars[0][:, 4].unsqueeze(1).repeat((1, N))
-        scores_2 = o_cars[1][:, 4].unsqueeze(1).repeat((1, K)).T
-        T[:, :, 0] = overlaps
-        T[:, :, 1] = scores_1
-        T[:, :, 2] = scores_2
-
-        T = torch.tensor(T).cuda().half()
-
-        # Fill last element of column with all IoU zeros with -1
-        non_overlapping_dets = ~overlaps.sum(dim=1).bool()
-        T[non_overlapping_dets, -1, 0] = -1   # IoU -1
-        T[non_overlapping_dets, -1, -1] = -1  # Score 2nd -1
-
-        non_empty_indices = torch.nonzero(T[:, :, 0])
-        non_empty_indices = torch.nonzero(T[:, :, 0], as_tuple=True)
-
-        # flat_T = T.reshape(-1, F)
-        # non_empty_elements = flat_T[torch.nonzero(flat_T[:, 0], as_tuple=True)]
-
-        non_empty_elements = T[non_empty_indices[0], non_empty_indices[1], :]
-
-        non_empty_elements_T = non_empty_elements.permute(1, 0)
-        non_empty_elements_T = non_empty_elements_T.unsqueeze(1).unsqueeze(0).cuda()  # Shape [1,3,1, #non-zero]
-
-        T_out = torch.zeros((1, K, N)).cuda().half()
-        # print("Tensor preparation:", time() - t)
-
-        t2 = time()
-        new_scores = self.fusion(non_empty_elements_T, T_out, non_empty_indices)
-        # print("Fusion:", time() - t2)
-        # TODO: Uncomment
-        # x1[0][0][:, 4] = new_scores.cpu().detach().numpy()
-
-        bboxes = x1 # [# images, #n_classes, # n_boxes]
-        losses = dict()
-
-        # assign_result = [self.assigner.assign(
-        #     x[0], gt_bboxes[0], gt_bboxes_ignore, gt_labels[0]) for x in x1]
-        #
-        # sampling_result = self.sampler.sample(assign_result, anchors,
-        #
-        #                                       gt_bboxes)
-        #
-
-        # Filter GT bboxes of class 0 (vehicles)
-        gt_bboxes_old = gt_bboxes
-        gt_labels_old = gt_labels
-        gt_bboxes = [bb[gt_labels[i]==0]  for i,bb in enumerate(gt_bboxes)]
-        gt_labels = [lab[lab==0] for lab in gt_labels]
-
-        t2 = time()
         num_imgs = len(img_metas)
         if gt_bboxes_ignore is None:
             gt_bboxes_ignore = [None for _ in range(num_imgs)]
@@ -382,69 +292,343 @@ class EnsembleModel(nn.Module):
                 assign_result,
                 torch.tensor(bboxes[i][0]).cuda(),
                 gt_bboxes[i])
-                # gt_labels[i])
+            # gt_labels[i])
             sampling_results.append(sampling_result)
 
-
         bbox_targets = self.get_targets(sampling_results, gt_bboxes,
-                                   gt_labels, rcnn_train_cfg=None)
+                                        gt_labels, rcnn_train_cfg=None)
+
+        # El sampler ordena primeros los N targets positivos y luego los N negativos,
+        # hay que reordenar la salida de labels para que coincida con el orden de las detecciones originales
+        order_inds = torch.cat((sampling_result.pos_inds, sampling_result.neg_inds))
+        original_order = bbox_targets[0].clone()
+        bbox_targets[0][order_inds] = original_order
+        # bbox_targets_s = (bbox_targets[0][order_inds], bbox_targets[1][order_inds], bbox_targets[2], bbox_targets[3])
+
+        return bbox_targets, sampling_results
+
+    @auto_fp16(apply_to=('img', ))
+    def forward(self, img, img_metas, return_loss=True, **kwargs):
+        """Calls either :func:`forward_train` or :func:`forward_test` depending
+        on whether ``return_loss`` is ``True``.
+
+        Note this setting will change the expected inputs. When
+        ``return_loss=True``, img and img_meta are single-nested (i.e. Tensor
+        and List[dict]), and when ``resturn_loss=False``, img and img_meta
+        should be double nested (i.e.  List[Tensor], List[List[dict]]), with
+        the outer list indicating test time augmentations.
+        """
+
+        if return_loss:
+            return self.forward_train(img, img_metas, **kwargs)
+        else:
+            return self.forward_test(img, img_metas, **kwargs)
+
+    def preds_base_models(self, img, img_metas):
+        t = time()
+        x1 = self.models[0](img, img_metas, return_loss=False, rescale=True)
+        # print("Model 1 inference:", time() - t)
+        t2 = time()
+        x2 = self.models[1](img, img_metas, return_loss=False, rescale=True)
+        # print("Model 2 inference:", time()-t2)
+        # print("Total inference time:", time()-t)
+
+        return x1, x2
+
+    def create_T(self, x1, x2, img_metas):
+        tt = time()
+        # Only batch of one image and predictions from class 0 (vehicles)
+        o_vehicles = [torch.tensor(x1[0][0]).cuda(), torch.tensor(x2[0][0]).cuda()]
+
+        # Get shapes and construct T tensor
+        K = x1[0][0].shape[0]
+        N = x2[0][0].shape[0]
+        F = 9
+        T = np.zeros((K, N, F), dtype=np.float16)  # TODO: torch.zeros Avoid numpy Float 16
+        # T = np.zeros((K, N, F))
+
+        # Calculate overlaps between predictions
+        t = time()
+        overlaps = bbox_overlaps(o_vehicles[0][:, :4], o_vehicles[1][:, :4]) # TODO: Calculate with FP16
+        # print("-----------------------------------")
+        # print("BBox overlaps:", time() - t)
+
+        t = time()
+        scores_1 = o_vehicles[0][:, 4].unsqueeze(1).repeat((1, N))
+        scores_2 = o_vehicles[1][:, 4].unsqueeze(1).repeat((1, K)).T
+
+        bboxes_1 = o_vehicles[0][:, :4]
+        bboxes_2 = o_vehicles[1][:, :4]
+        img_h, img_w = img_metas[0][0]['img_shape'][0], img_metas[0][0]['img_shape'][1]
+        # Normalize boxes
+        bboxes_1[:, [0, 2]], bboxes_1[:, [1, 3]] = bboxes_1[:, [0, 2]]/img_w, bboxes_1[:, [1, 3]]/img_h
+        bboxes_2[:, [0, 2]], bboxes_2[:, [1, 3]] = bboxes_2[:, [0, 2]]/img_w, bboxes_2[:, [1, 3]]/img_h
+
+        bboxes_1 = bbox_xyxy_to_cxcywh(bboxes_1)
+        bboxes_2 = bbox_xyxy_to_cxcywh(bboxes_2)
+        # print("Parte1:", time() - t)
+
+        t = time()
+        # Scale difference
+        w1, w2 = bboxes_1[:, 2].unsqueeze(1).repeat((1, N)), bboxes_2[:, 2].unsqueeze(1).repeat((1, K)).T
+        h1, h2 = bboxes_1[:, 3].unsqueeze(1).repeat((1, N)), bboxes_2[:, 3].unsqueeze(1).repeat((1, K)).T
+        w_diff = torch.log(w1 / w2)
+        h_diff = torch.log(h1 / h2)
+        aspect_diff = torch.log(w1 / h1) - torch.log(w2 / h2)
+
+
+        # Distance x, y
+        cx1, cx2 = bboxes_1[:, 0].unsqueeze(1).repeat((1, N)), bboxes_2[:, 0].unsqueeze(1).repeat((1, K)).T
+        cy1, cy2 = bboxes_1[:, 1].unsqueeze(1).repeat((1, N)), bboxes_2[:, 1].unsqueeze(1).repeat((1, K)).T
+        x_dist = cx1-cx2
+        y_dist = cy1-cy2
+        l2_dist = torch.sqrt(x_dist**2 + y_dist**2)
+        # print("Parte2:", time() - t)
+        #
+        # t = time()
+        # T[:, :, 0] = overlaps.cpu()
+        # T[:, :, 1] = scores_1.cpu()
+        # T[:, :, 2] = scores_2.cpu()
+        # T[:, :, 3] = x_dist.cpu()
+        # T[:, :, 4] = y_dist.cpu()
+        # T[:, :, 5] = l2_dist.cpu()
+        # T[:, :, 6] = w_diff.cpu()
+        # T[:, :, 7] = h_diff.cpu()
+        # T[:, :, 8] = aspect_diff.cpu()
+        #
+        # T = torch.tensor(T).cuda()
+        # print("Parte3:", time() - t)
+
+        t = time()
+        T = torch.stack((overlaps, scores_1, scores_2, x_dist, y_dist, l2_dist, w_diff, h_diff, aspect_diff), dim=2)
+        # print("Parte3:", time() - t)
+        # print("Hasta Parte3:", time() - tt)
+
+        t = time()
+        # Fill last element of column with all IoU zeros with -1
+        non_overlapping_dets = ~overlaps.sum(dim=0).bool()
+        T[-1, non_overlapping_dets, 0] = -1   # IoU -1
+        T[-1, non_overlapping_dets, 1] = -1  # Score Retina -1
+        # print("Parte4:", time() - t)
+
+        t = time()
+        # TODO: Maybe increase threshold to 0.2
+        # non_empty_indices = torch.nonzero(T[:, :, 0])
+        non_empty_indices = torch.nonzero(T[:, :, 0], as_tuple=True)
+        # non_empty_indices = torch.where((torch.greater_equal(T[:, :, 0], 0.2)) | (torch.less(T[:, :, 0], 0)))
+
+        non_empty_elements = T[non_empty_indices[0], non_empty_indices[1], :]
+
+        non_empty_elements_T = non_empty_elements.permute(1, 0)
+        non_empty_elements_T = non_empty_elements_T.unsqueeze(1).unsqueeze(0).cuda()  # Shape [1, 9, 1, #non-zero]
+        # print("Parte5:", time() - t)
+        # print("Hasta Parte5:", time() - tt)
+
+
+        # TODO: T_out tensor very slow
+        t = time()
+        T_out = torch.zeros((1, K, N)).cuda()
+        # print("Parte6:", time() - t)
+        # print("Hasta Parte6:", time() - tt)
+        #
+
+        # T_out = T_out.cuda()
+
+
+        return T, T_out, non_empty_elements_T, non_empty_indices
+
+    def forward_train(self,
+                      img,
+                      img_metas,
+                      gt_bboxes,
+                      gt_labels,
+                      gt_bboxes_ignore=None,
+                      gt_masks=None,
+                      proposals=None,
+                      **kwargs):
+        t = time()
+        id = img_metas[0]['id']
+        # X1: RetinaNet, X2: FasterRCNN (Supongo que X2 es el mejor modelo) Shape: [# images, #n_classes, # n_boxes]
+        if self.saved_preds:
+            x1, x2 = [self.saved_preds[0][id]], [self.saved_preds[1][id]]
+        else:
+            with torch.no_grad():
+                # torch.backends.cudnn.enabled = False  # This solves the error of using different types of GPU
+                x1, x2 = self.preds_base_models([img], [img_metas])
+        # print("Read:", time()-t)
+        # o = [[np.concatenate(r_c) for r_c in zip(*r_img)] for r_img in zip(x1, x2)]
+        # o_cars = torch.tensor(o[0][0], dtype=torch.float16).cuda()
+
+        x1[0][0] = x1[0][0][x1[0][0][:, 4].argsort()][::-1][:self.n_dets1].copy()
+        x2[0][0] = x2[0][0][x2[0][0][:, 4].argsort()][::-1][:self.n_dets2].copy()
+
+        # TODO: Esta parte (Tensor preparation) es muy lenta
+        t = time()
+        T, T_out, non_empty_elements_T, non_empty_indices = self.create_T(x1, x2, [img_metas])
+        # print("Tensor preparation:", time() - t)
+
+        # Fusion network
+        t = time()
+        fusion_scores1, fusion_scores2 = self.fusion(non_empty_elements_T, T_out, non_empty_indices)
+        # print("Fusion:", time() - t)
+        # TODO: Uncomment
+        # x1[0][0][:, 4] = new_scores.cpu().detach().numpy()
+
+        # Training: bbox assignment and loss calculation
+        # Filter GT bboxes of class 0 (vehicles)
+        gt_bboxes_vehicles = [bb[gt_labels[i] == 0] for i, bb in enumerate(gt_bboxes)]
+        gt_labels_vehicles = [lab[lab == 0] for lab in gt_labels]
+        bbox_targets1, sampling_results1 = self.get_bbox_targets(x1, gt_bboxes_vehicles, gt_labels_vehicles, gt_bboxes_ignore, img_metas)
+        bbox_targets2, sampling_results2 = self.get_bbox_targets(x2, gt_bboxes_vehicles, gt_labels_vehicles, gt_bboxes_ignore, img_metas)
+
 
         # cls_score = torch.tensor(1 - x1[0][0][:, 4], requires_grad=True).cuda()
         # cls_score = 1 - new_scores
-        m = nn.Sigmoid()
-        cls_score = new_scores
+        old_scores = torch.tensor(x2[0][0][:, 4]).cuda().clone()
+        cls_score = fusion_scores2
+        cls_score = torch.unsqueeze(cls_score, 1)
+        bbox_targets, sampling_results = bbox_targets2, sampling_results2
+
+        losses = dict()
         loss_bbox = self.loss(cls_score, *bbox_targets)
+        loss_bbox2 = self.loss(torch.unsqueeze(fusion_scores1, 1), *bbox_targets1)
+        if loss_bbox['loss_cls'] > 1:
+            print()
         losses.update(loss_bbox)
 
-        loss_prev = nn.functional.binary_cross_entropy(torch.tensor(x1[0][0][:, 4]).cuda(), bbox_targets[0].float(), reduction='mean')
-        loss_new = nn.functional.binary_cross_entropy_with_logits(cls_score, bbox_targets[0].float(), reduction='mean')
+        # Check loss and compare
+        inv_sigmoid = torch.log(old_scores/(1-old_scores))
+        loss_bbox_prev = self.loss(torch.unsqueeze(inv_sigmoid, 1), *bbox_targets) # Only uses first two items of bbox_targets
+        # loss_bbox_prev = self.loss(old_scores, *bbox_targets) # Only uses first two items of bbox_targets
+        label, _ = self._expand_onehot_labels(bbox_targets[0], bbox_targets[1], 1)
+            # TODO: Check loss is calculated correctly
+        loss_prev_ce = nn.functional.binary_cross_entropy(torch.unsqueeze(old_scores, 1), label.float(), reduction='mean')
+        loss_new_ce = nn.functional.binary_cross_entropy_with_logits(cls_score, label.float(), reduction='mean')
+        # print(loss_bbox)
 
-        img_meta = img_metas[0]
-        image = img[0].cpu().detach()
-        image = image.permute((1, 2, 0))
+        if self.log_wandb:
+            wandb.log({"loss_prev_ce": loss_bbox_prev['loss_cls'].clone().cpu(),
+                      "loss_new_ce": loss_bbox['loss_cls'].clone().cpu(),
+                       "acc_prev_ce": loss_bbox_prev['acc'].clone().cpu(),
+                       "acc_new_ce": loss_bbox['acc'].clone().cpu()
+                       })
+        # print("Loss:", time() - t)
 
-        mean = img_meta['img_norm_cfg']['mean']
-        std = img_meta['img_norm_cfg']['std']
-        image = mmcv.imdenormalize(image.numpy(), mean, std, False)
-        image = image.astype(np.uint8)
+        # Individual losses
+        # loss_per_det = nn.functional.binary_cross_entropy_with_logits(cls_score, label.float(), reduction='none')
+        # max_loss_ind = torch.where(loss_per_det == loss_per_det.max())[0]
 
-        from mmdet.core.visualization.image import imshow_det_bboxes
-        # imshow_det_bboxes(image, bboxes[0][0][-2:], np.zeros(2, dtype=np.int))
-        gts = gt_bboxes[0].detach().cpu().numpy()
-        labs = gt_labels[0].detach().cpu().numpy()
-        # print()
+        # Plot image
+        # image = self.get_image(img, img_metas)
+        #
+        # gts = gt_bboxes[0].detach().cpu().numpy()
+        # labs = gt_labels[0].detach().cpu().numpy()
         # imshow_det_bboxes(image, gts, labs)
+
+
+        # max_loss = loss_per_det[max_loss_ind]
+        # m = nn.Sigmoid()
+        # max_loss_old_sc = old_scores[max_loss_ind]
+        # max_loss_sc = m(cls_score[max_loss_ind])
+        # max_loss_bbox = x2[0][0][max_loss_ind][:4]
+        #
+        # target_class = bbox_targets[0][max_loss_ind]  # 0: Vehicle, 1: Background
+        #
+        # if target_class == 0:
+        #     target_gt_ind = sampling_results[0].pos_assigned_gt_inds[torch.where(sampling_results[0].pos_inds == max_loss_ind)[0]]
+        #     target_gt = gts[target_gt_ind]
+        # print()
+        #
+        # t_out = T_out[0, :, max_loss_ind]
+        # t_out[t_out > -10]
+        # t = T[:, max_loss_ind].squeeze(1)
+        # t_overlap = t[t[:, 0] > 0]
+        # imshow_det_bboxes(image, np.concatenate((np.expand_dims(max_loss_bbox, 0), np.expand_dims(target_gt, 0))), np.array([0, 1]), show=False)
+        # imshow_det_bboxes(image, np.expand_dims(max_loss_bbox, 0), np.array([0]), show=False)
+
+        # o_last = T_out[0][-1]
+        # a = x1[0][0][-1]
+        # a2 = x1[0][0][1]
+        # c = x2[0][0][965]
+        # iou_ab = T[-1][0][0]
+        # s = m(cls_score)[-1]
+
+        # imshow_det_bboxes(image, np.concatenate((a[np.newaxis, :], c[np.newaxis, :] )), np.array([0, 1]), show=False)
+
+        # maxim = x2[0][0][222]
+        # gt3 = np.concatenate((gts[0], [200]))
+        # imshow_det_bboxes(image, np.concatenate((maxim[np.newaxis, :], gt3[np.newaxis, :])), np.array([0, 1]), show=False)
 
         # p = next(model.parameters()).clone()
         # print(torch.all(torch.eq(next(model.parameters()), p)))
         # print(p[0][0])
-        # print("Loss Assigner:", time() - t2)
 
-        # loss_cls = dict(
-        #     type='CrossEntropyLoss',
-        #     use_sigmoid=False,
-        #     loss_weight=1.0)
-
-        # loss_cls=dict(
-        #     type='FocalLoss',
-        #     use_sigmoid=True,
-        #     gamma=2.0,
-        #     alpha=0.25,
-        #     loss_weight=1.0)
-
-        # self.loss_cls = build_loss(loss_cls)
-        # self.loss_cls(
-        #     cls_score,
-        #     bbox_targets[0],
-        #     bbox_targets[1],
-        #     avg_factor=1,
-        #     reduction_override=None)
 
         return losses
 
+    def forward_test(self, img, img_metas, proposals=None, rescale=False):
+
+        # if not isinstance(img, list):
+        #     img, img_metas = [img], [img_metas]
+
+        image = self.get_image(img[0], img_metas[0])
+        # plt.imshow(image)
+        # plt.show()
 
 
-    # Esto está inspirado en la función de bbox_head.py
+        with torch.no_grad():
+            x1, x2 = self.preds_base_models(img, img_metas)
+
+        # o = [[np.concatenate(r_c) for r_c in zip(*r_img)] for r_img in zip(x1, x2)]
+
+        x1[0][0] = x1[0][0][x1[0][0][:, 4].argsort()][::-1][:self.n_dets1].copy()
+        x2[0][0] = x2[0][0][x2[0][0][:, 4].argsort()][::-1][:self.n_dets2].copy()
+
+        T, T_out, non_empty_elements_T, non_empty_indices = self.create_T(x1, x2, img_metas)
+
+        fusion_scores1, fusion_scores2 = self.fusion(non_empty_elements_T, T_out, non_empty_indices)
+
+        m = nn.Sigmoid()
+        sc1 = m(fusion_scores1)
+        sc2 = m(fusion_scores2)
+        x1old = deepcopy(x1)
+        x1[0][0][:, 4] = sc1.cpu()
+        x2[0][0][:, 4] = sc2.cpu()
+
+        # print(time()-t)
+        # for k in o_cars[0]:
+        #     for n in o_cars[1]:
+        #         iou = bbox_overlaps(k[:4], n[:4])
+
+        # cfg = {'type': 'nms', 'iou_threshold': 0.5}
+        # d1 = [ensembleDetections([dets], cfg) for dets in x1]
+        # d2 = [ensembleDetections([dets], cfg) for dets in x2]
+        #
+        # d1 = d1[0][0][d1[0][0][:, 4] > 0.05]
+        # d2 = d2[0][0][d2[0][0][:, 4] > 0.05]
+        #
+        # box = x1[0][0][15]
+        # box_old = x1old[0][0][15]
+        # # neig = torch.where(T[15][:, 0])[0]
+        # neig = torch.where((torch.greater_equal(T[15][:, 0], 0.2)) | (torch.less(T[15][:, 0], 0)))
+        # maxsc_neig = T_out[0][15][881]
+        # T_neig = T[15][881]
+        #
+        # box2 = x2[0][0][881]
+
+        # imshow_det_bboxes(image, np.concatenate((box[np.newaxis, :], box2[np.newaxis,:])), np.array([0,0]), show=False)
+
+        # return x1, x2
+        # Postprocess predictions
+        score_th = 0.05
+        nms_cfg = {'type': 'nms', 'iou_threshold': 0.5}
+        max_dets_class = 100
+
+        x2 = postprocess_detections(x2, score_th, nms_cfg, max_dets_class)
+        return x2
+
+    # from mmdet.models.roi_head.bbox_heads.bbox_head
+    @force_fp32(apply_to=('cls_score', 'bbox_pred'))
     def loss(self,
              cls_score,
              labels,
@@ -464,7 +648,13 @@ class EnsembleModel(nn.Module):
                     label_weights,
                     avg_factor=avg_factor,
                     reduction_override=reduction_override)
-                # losses['acc'] = accuracy(cls_score, labels)
+                # TODO: introduce cls_score already with sigmoid activation to avoid this code and the change in cross_entropy
+                # label, _ = self._expand_onehot_labels(labels, label_weights, self.num_classes)
+                m = nn.Sigmoid()
+                sg_cls_score = m(cls_score).repeat(1, 2).clone()
+                sg_cls_score[:, 1] = 1 - sg_cls_score[:, 0]
+                losses['acc'] = accuracy(sg_cls_score, labels)
+                losses['acc_vehicles'] = accuracy(sg_cls_score[labels==0], labels[labels==0])
         return losses
 
     def _parse_losses(self, losses):
@@ -501,142 +691,6 @@ class EnsembleModel(nn.Module):
             log_vars[loss_name] = loss_value.item()
 
         return loss, log_vars
-
-    @auto_fp16(apply_to=('img', ))
-    def forward_test(self, img, img_metas, proposals=None, rescale=False):
-        # for model in self.models[:-1]:
-        #     x = F.relu(model(x))
-        # x = self.models[-1](x) # don't use relu for last model
-
-
-        # TODO: Check this
-        with torch.no_grad():
-            t2 = time()
-            x1 = self.models[0](img, img_metas, return_loss=False, rescale=True)
-            x2 = self.models[1](img, img_metas, return_loss=False, rescale=True)
-            print(time()-t2)
-        o = [[np.concatenate(r_c) for r_c in zip(*r_img)] for r_img in zip(x1, x2)]
-
-        x1[0][0] = x1[0][0][x1[0][0][:, 4].argsort()][::-1][:1000].copy()
-        x2[0][0] = x2[0][0][x2[0][0][:, 4].argsort()][::-1][:1000].copy()
-
-
-        o_cars = torch.tensor(o[0][0], dtype=torch.float16).cuda()
-        print()
-
-        ## TODO: Add center distance
-
-        o_cars = [torch.tensor(x1[0][0]), torch.tensor(x2[0][0])]
-        K = x1[0][0].shape[0]
-        N = x2[0][0].shape[0]
-        F = 7
-        T = np.zeros(((K, N, F)),  dtype=np.float32)    #TODO: torch.zeros Avoid numpy
-
-        t = time()
-        overlaps = bbox_overlaps(o_cars[0][:, :4], o_cars[1][:, :4])
-        scores_1 = o_cars[0][:, 4].unsqueeze(1).repeat((1, N))
-        scores_2 = o_cars[1][:, 4].unsqueeze(1).repeat((1, K)).T
-
-
-        img_h, img_w = img_metas[0][0]['img_shape'][0], img_metas[0][0]['img_shape'][1]
-        bboxes_1 = o_cars[0][:, :4]
-        bboxes_2 = o_cars[1][:, :4]
-        # Normalize boxes
-        bboxes_1[:, [0, 2]], bboxes_1[:, [1, 3]] = bboxes_1[:, [0, 2]]/img_w, bboxes_1[:, [1, 3]]/img_h
-        bboxes_2[:, [0, 2]], bboxes_2[:, [1, 3]] = bboxes_2[:, [0, 2]]/img_w, bboxes_2[:, [1, 3]]/img_h
-
-        # Distance x, y
-        cx1, cx2 = bboxes_1[:, 0].unsqueeze(1).repeat((1, N)), bboxes_2[:, 0].unsqueeze(1).repeat((1, K)).T
-        cy1, cy2 = bboxes_1[:, 1].unsqueeze(1).repeat((1, N)), bboxes_2[:, 1].unsqueeze(1).repeat((1, K)).T
-        x_dist = cx1-cx2
-        y_dist = cy1-cy2
-        l2_dist = torch.sqrt(x_dist**2 + y_dist**2)
-
-        T[:, :, 0] = overlaps
-        T[:, :, 1] = scores_1
-        T[:, :, 2] = scores_2
-        T[:, :, 3] = x_dist
-        T[:, :, 4] = y_dist
-        T[:, :, 5] = l2_dist
-        T[:, :, 6] = l2_dist
-
-
-        T = torch.tensor(T).cuda().half()
-
-        # Fill last element of column with all IoU zeros with -1
-        non_overlapping_dets = ~overlaps.sum(dim=1).bool()
-        T[non_overlapping_dets, -1, 0] = -1   # IoU -1
-        T[non_overlapping_dets, -1, 2] = -1  # Score 2nd -1
-
-        # TODO: Fill last element of column with all IoU zeros with -1
-        non_empty_indices = torch.nonzero(T[:, :, 0])
-        non_empty_indices = torch.nonzero(T[:, :, 0], as_tuple=True)
-        non_empty_indices = torch.where((torch.greater_equal(T[:, :, 0], 0.2)) | (torch.less(T[:, :, 0], 0)))
-
-        # flat_T = T.reshape(-1, F)
-        # non_empty_elements = flat_T[torch.nonzero(flat_T[:, 0], as_tuple=True)]
-
-        non_empty_elements = T[non_empty_indices[0], non_empty_indices[1], :]
-
-        non_empty_elements_T = non_empty_elements.permute(1, 0)
-        non_empty_elements_T = non_empty_elements_T.unsqueeze(1).unsqueeze(0).cuda()    # Shape [1,3,1, #non-zero]
-
-        T_out = torch.zeros((1, K, N)).cuda().half()
-
-        new_scores, new_scores2 = self.fusion(non_empty_elements_T, T_out, non_empty_indices)
-
-        m = nn.Sigmoid()
-        new_scores = m(new_scores)
-        new_scores2 = m(new_scores2)
-        x1old = deepcopy(x1)
-        x1[0][0][:, 4] = new_scores.cpu()
-        x2[0][0][:, 4] = new_scores2.cpu()
-        # print(time()-t)
-        # for k in o_cars[0]:
-        #     for n in o_cars[1]:
-        #         iou = bbox_overlaps(k[:4], n[:4])
-
-        cfg = {'type': 'nms', 'iou_threshold': 0.5}
-        d1 = [ensembleDetections([dets], cfg) for dets in x1]
-        d2 = [ensembleDetections([dets], cfg) for dets in x2]
-
-        d1 = d1[0][0][d1[0][0][:, 4] > 0.05]
-        d2 = d2[0][0][d2[0][0][:, 4] > 0.05]
-
-        box = x1[0][0][15]
-        box_old = x1old[0][0][15]
-        # neig = torch.where(T[15][:, 0])[0]
-        neig = torch.where((torch.greater_equal(T[15][:, 0], 0.2)) | (torch.less(T[15][:, 0], 0)))
-        maxsc_neig = T_out[0][15][881]
-        T_neig = T[15][881]
-
-        box2 = x2[0][0][881]
-
-
-        img_meta = img_metas[0][0]
-        image = img[0][0].cpu().detach()
-        image = image.permute((1, 2, 0))
-
-        mean = img_meta['img_norm_cfg']['mean']
-        std = img_meta['img_norm_cfg']['std']
-        image = mmcv.imdenormalize(image.numpy(), mean, std, False)
-        image = image.astype(np.uint8)
-        # imshow_det_bboxes(image, np.concatenate((box[np.newaxis, :], box2[np.newaxis,:])), np.array([0,0]), show=False)
-
-        # x2 = [ [x2[0][ ], []]
-        # o = []
-        # for r_img in zip(x1, x2):
-        #     o_img = []
-        #     for r_c in zip(*r_img):
-        #         o_c = np.concatenate(r_c)
-        #         o_img.append(o_c)
-        #     o.append(o_img)
-
-        # [torch.cat(r_c)  for r_c in zip(r_img)   for r_img in zip(x1,x2)]
-        # r = torch.cat([x1, x2])
-
-        # return o, x1
-        return x1, x2
 
     def train_step(self, data, optimizer):
         """The iteration step during training.

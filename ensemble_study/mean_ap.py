@@ -49,6 +49,13 @@ def average_precision(recalls, precisions, mode='area'):
                 prec = precs.max() if precs.size > 0 else 0
                 ap[i] += prec
         ap /= 11
+    elif mode == '101points':
+        for i in range(num_scales):
+            for thr in np.arange(0, 1 + 1e-3, 0.01):
+                precs = precisions[i, recalls[i, :] >= thr]
+                prec = precs.max() if precs.size > 0 else 0
+                ap[i] += prec
+        ap /= 101
     else:
         raise ValueError(
             'Unrecognized mode, only "area" and "11points" are supported')

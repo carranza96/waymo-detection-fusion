@@ -81,7 +81,30 @@ def multiclass_nms(multi_bboxes,
         else:
             return bboxes, labels
 
-    dets, keep = batched_nms(bboxes, scores, labels, nms_cfg)
+
+    dets_, keep_ = [], []
+    for i in range(3):
+        class_indices = torch.where(labels==i)[0]
+        if class_indices.size(0):
+            class_bboxes, class_scores, class_labels = torch.clone(bboxes)[class_indices], \
+                                                       torch.clone(scores)[class_indices], torch.clone(labels)[class_indices]
+            if i==0:
+                nms_cfg['iou_threshold'] = 0.73
+            else:
+                nms_cfg['iou_threshold'] = 0.58
+            class_dets, class_keep = batched_nms(class_bboxes, class_scores, class_labels, nms_cfg)
+            class_keep = class_indices[class_keep]
+            dets_.append(class_dets)
+            keep_.append(class_keep)
+
+    dets_, keep_ = torch.cat(dets_).cuda(), torch.cat(keep_).cuda()
+    ordered_ind_ = torch.argsort(scores[keep_], descending=True)
+    dets_, keep_ = dets_[ordered_ind_], keep_[ordered_ind_]
+
+    dets, keep = dets_, keep_
+
+    # dets, keep = batched_nms(bboxes, scores, labels, nms_cfg)
+
 
     if max_num > 0:
         dets = dets[:max_num]

@@ -166,7 +166,8 @@ class LoadMultiChannelImageFromFiles(object):
         for name in filename:
             img_bytes = self.file_client.get(name)
             img.append(mmcv.imfrombytes(img_bytes, flag=self.color_type))
-        img = np.stack(img, axis=-1)
+        # img = np.stack(img, axis=-1)
+        img = np.dstack(img)
         if self.to_float32:
             img = img.astype(np.float32)
 
@@ -183,6 +184,7 @@ class LoadMultiChannelImageFromFiles(object):
             mean=np.zeros(num_channels, dtype=np.float32),
             std=np.ones(num_channels, dtype=np.float32),
             to_rgb=False)
+        results['id'] = results['img_info']['id']
         return results
 
     def __repr__(self):

@@ -134,6 +134,8 @@ class BBoxHead(BaseModule):
         bbox_weights = pos_bboxes.new_zeros(num_samples, 4)
         if num_pos > 0:
             labels[:num_pos] = pos_gt_labels
+            # weight_dict = {0:0.5, 1:0.8, 2: 1.}
+            # pos_weight = [weight_dict[l]   for l in labels[:num_pos].cpu().numpy()]
             pos_weight = 1.0 if cfg.pos_weight <= 0 else cfg.pos_weight
             label_weights[:num_pos] = pos_weight
             if not self.reg_decoded_bbox:
@@ -151,6 +153,7 @@ class BBoxHead(BaseModule):
             label_weights[-num_neg:] = 1.0
 
         return labels, label_weights, bbox_targets, bbox_weights
+
 
     def get_targets(self,
                     sampling_results,

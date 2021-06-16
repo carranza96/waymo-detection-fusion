@@ -1,4 +1,5 @@
 import math
+import warnings
 
 import torch
 import torch.nn as nn
@@ -6,13 +7,21 @@ from mmcv.cnn import build_activation_layer, build_norm_layer, xavier_init
 from mmcv.cnn.bricks.registry import (TRANSFORMER_LAYER,
                                       TRANSFORMER_LAYER_SEQUENCE)
 from mmcv.cnn.bricks.transformer import (BaseTransformerLayer,
-                                         MultiScaleDeformableAttention,
                                          TransformerLayerSequence,
                                          build_transformer_layer_sequence)
 from mmcv.runner.base_module import BaseModule
 from torch.nn.init import normal_
 
 from mmdet.models.utils.builder import TRANSFORMER
+
+try:
+    from mmcv.ops.multi_scale_deform_attn import MultiScaleDeformableAttention
+
+except ImportError:
+    warnings.warn(
+        '`MultiScaleDeformableAttention` in MMCV has been moved to '
+        '`mmcv.ops.multi_scale_deform_attn`, please update your MMCV')
+    from mmcv.cnn.bricks.transformer import MultiScaleDeformableAttention
 
 
 def inverse_sigmoid(x, eps=1e-5):
@@ -384,7 +393,7 @@ class DeformableDetrTransformer(Transformer):
                 nn.init.xavier_uniform_(p)
         for m in self.modules():
             if isinstance(m, MultiScaleDeformableAttention):
-                m.init_weight()
+                m.init_weights()
         if not self.as_two_stage:
             xavier_init(self.reference_points, distribution='uniform', bias=0.)
         normal_(self.level_embeds)
@@ -544,11 +553,11 @@ class DeformableDetrTransformer(Transformer):
             reg_branches (obj:`nn.ModuleList`): Regression heads for
                 feature maps from each decoder layer. Only would
                 be passed when
-                `with_box_refine` is Ture. Default to None.
+                `with_box_refine` is True. Default to None.
             cls_branches (obj:`nn.ModuleList`): Classification heads
                 for feature maps from each decoder layer. Only would
                  be passed when `as_two_stage`
-                 is Ture. Default to None.
+                 is True. Default to None.
 
 
         Returns:

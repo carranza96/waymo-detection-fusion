@@ -56,6 +56,63 @@ def py_sigmoid_focal_loss(pred,
     return loss
 
 
+
+def reduced_sigmoid_focal_loss(pred,
+                          target,
+                          weight=None,
+                          gamma=2.0,
+                          alpha=0.25,
+                          reduction='mean',
+                          avg_factor=None,
+                          threshold=0.5):
+    """PyTorch version of `Focal Loss <https://arxiv.org/abs/1708.02002>`_.
+
+    Args:
+        pred (torch.Tensor): The prediction with shape (N, C), C is the
+            number of classes
+        target (torch.Tensor): The learning label of the prediction.
+        weight (torch.Tensor, optional): Sample-wise loss weight.
+        gamma (float, optional): The gamma for calculating the modulating
+            factor. Defaults to 2.0.
+        alpha (float, optional): A balanced form for Focal Loss.
+            Defaults to 0.25.
+        reduction (str, optional): The method used to reduce the loss into
+            a scalar. Defaults to 'mean'.
+        avg_factor (int, optional): Average factor that is used to average
+            the loss. Defaults to None.
+    """
+    # t = torch.nn.functional.one_hot(target.long()).float()
+    l = nn.BCEWithLogitsLoss(reduction='none')
+    ce = l(pred, target.float())
+    pred_sigmoid = pred.sigmoid()
+
+    pt = (1 - pred_sigmoid) * target + pred_sigmoid * (1 - target)
+    modulating_factor = torch.greater_equal(pt, threshold).float() + torch.less(pt, threshold).float() * (pt).pow(gamma)/torch.tensor(threshold).pow(gamma)
+    focal_weight = (alpha * target + (1 - alpha) *
+                    (1 - target)) * modulating_factor
+    loss = ce * focal_weight
+
+    if weight is not None:
+        if weight.shape != loss.shape:
+            if weight.size(0) == loss.size(0):
+                # For most cases, weight is of shape (num_priors, ),
+                #  which means it does not have the second axis num_class
+                weight = weight.view(-1, 1)
+            else:
+                # Sometimes, weight per anchor per class is also needed. e.g.
+                #  in FSAF. But it may be flattened of shape
+                #  (num_priors x num_class, ), while loss is still of shape
+                #  (num_priors, num_class).
+                assert weight.numel() == loss.numel()
+                weight = weight.view(loss.size(0), -1)
+        assert weight.ndim == loss.ndim
+    loss = weight_reduce_loss(loss, weight, reduction, avg_factor)
+    return loss
+
+
+
+
+
 def sigmoid_focal_loss(pred,
                        target,
                        weight=None,
@@ -110,7 +167,8 @@ class FocalLoss(nn.Module):
                  gamma=2.0,
                  alpha=0.25,
                  reduction='mean',
-                 loss_weight=1.0):
+                 loss_weight=1.0,
+                 threshold=None):
         """`Focal Loss <https://arxiv.org/abs/1708.02002>`_
 
         Args:
@@ -132,6 +190,7 @@ class FocalLoss(nn.Module):
         self.alpha = alpha
         self.reduction = reduction
         self.loss_weight = loss_weight
+        self.threshold = threshold
 
     def forward(self,
                 pred,
@@ -159,7 +218,12 @@ class FocalLoss(nn.Module):
         reduction = (
             reduction_override if reduction_override else self.reduction)
         if self.use_sigmoid:
-            if torch.cuda.is_available() and pred.is_cuda:
+            if self.threshold:
+                num_classes = pred.size(1)
+                target = F.one_hot(target, num_classes=num_classes + 1)
+                target = target[:, :num_classes]
+                calculate_loss_func = reduced_sigmoid_focal_loss
+            elif torch.cuda.is_available() and pred.is_cuda:
                 calculate_loss_func = sigmoid_focal_loss
             else:
                 num_classes = pred.size(1)
@@ -174,7 +238,8 @@ class FocalLoss(nn.Module):
                 gamma=self.gamma,
                 alpha=self.alpha,
                 reduction=reduction,
-                avg_factor=avg_factor)
+                avg_factor=avg_factor,
+                threshold=self.threshold)
 
         else:
             raise NotImplementedError

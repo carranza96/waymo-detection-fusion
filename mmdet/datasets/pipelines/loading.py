@@ -9,7 +9,7 @@ from ..builder import PIPELINES
 
 
 @PIPELINES.register_module()
-class LoadImageFromFile(object):
+class LoadImageFromFile:
     """Load an image from file.
 
     Required keys are "img_prefix" and "img_info" (a dict that must contain the
@@ -67,6 +67,7 @@ class LoadImageFromFile(object):
         results['img_shape'] = img.shape
         results['ori_shape'] = img.shape
         results['img_fields'] = ['img']
+        results['id'] = results['img_info']['id']
         return results
 
     def __repr__(self):
@@ -110,7 +111,7 @@ class LoadImageFromWebcam(LoadImageFromFile):
 
 
 @PIPELINES.register_module()
-class LoadMultiChannelImageFromFiles(object):
+class LoadMultiChannelImageFromFiles:
     """Load multi-channel images from a list of separate channel files.
 
     Required keys are "img_prefix" and "img_info" (a dict that must contain the
@@ -165,7 +166,8 @@ class LoadMultiChannelImageFromFiles(object):
         for name in filename:
             img_bytes = self.file_client.get(name)
             img.append(mmcv.imfrombytes(img_bytes, flag=self.color_type))
-        img = np.stack(img, axis=-1)
+        # img = np.stack(img, axis=-1)
+        img = np.dstack(img)
         if self.to_float32:
             img = img.astype(np.float32)
 
@@ -182,6 +184,7 @@ class LoadMultiChannelImageFromFiles(object):
             mean=np.zeros(num_channels, dtype=np.float32),
             std=np.ones(num_channels, dtype=np.float32),
             to_rgb=False)
+        results['id'] = results['img_info']['id']
         return results
 
     def __repr__(self):
@@ -193,8 +196,8 @@ class LoadMultiChannelImageFromFiles(object):
 
 
 @PIPELINES.register_module()
-class LoadAnnotations(object):
-    """Load mutiple types of annotations.
+class LoadAnnotations:
+    """Load multiple types of annotations.
 
     Args:
         with_bbox (bool): Whether to parse and load the bbox annotation.
@@ -385,7 +388,7 @@ class LoadAnnotations(object):
 
 
 @PIPELINES.register_module()
-class LoadProposals(object):
+class LoadProposals:
     """Load proposal pipeline.
 
     Required key is "proposals". Updated keys are "proposals", "bbox_fields".
@@ -430,7 +433,7 @@ class LoadProposals(object):
 
 
 @PIPELINES.register_module()
-class FilterAnnotations(object):
+class FilterAnnotations:
     """Filter invalid annotations.
 
     Args:

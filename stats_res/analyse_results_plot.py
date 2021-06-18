@@ -99,16 +99,27 @@ def plots_dets_gts_stats(model="faster_rcnn_r50_fpn_fp16_4x1_3e_1280x1920"):
     fig.subplots_adjust(hspace=0.4, wspace=0.4)
 
     ax = fig.add_subplot(1, 1, 1)
-    sns.histplot(data=df_dets[(df_dets["fp"] == 1) & (df_dets["fp_cats"])], x="score",
+    sns.histplot(data=df_dets[(df_dets["fp"] == 1) & (df_dets["fp_cats"]) & (df_dets["class"] == 0)], x="score",
                      hue="fp_cats", ax=ax, bins=10)
     ax.set_title("False positives")
 
     fig.savefig("stats_res/{}/fps.png".format(model), dpi=300)
 
 
+    fig = plt.figure(figsize=(12, 10))
+    fig.subplots_adjust(hspace=0.4, wspace=0.4)
+
+    ax = fig.add_subplot(1, 1, 1)
+    sns.histplot(data=df_dets[(df_dets["tp"] == 1) & (df_dets["class"] == 0)], x="score", ax=ax, bins=10)
+    ax.set_title("True positives")
+
+    fig.savefig("stats_res/{}/tps.png".format(model), dpi=300)
 
 
-plots_dets_gts_stats()
+
+
+# plots_dets_gts_stats(model="ensemble/wbf_faster50_retina50_3e")
+plots_dets_gts_stats(model="faster_rcnn_r50_fpn_fp16_4x1_3e_1280x1920")
 
 # Different resolution
 # barplot_diff_results("res_diff_models",

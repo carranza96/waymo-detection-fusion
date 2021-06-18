@@ -170,7 +170,7 @@ class WaymoOpenDataset(CustomDataset):
         else:
             gt_bboxes_ignore = np.zeros((0, 4), dtype=np.float32)
 
-        seg_map = img_info['filename'].replace('jpg', 'png')
+        seg_map = img_info['filename']#.replace('jpg', 'png')
 
         ann = dict(
             bboxes=gt_bboxes,
@@ -520,7 +520,8 @@ class WaymoOpenDataset(CustomDataset):
                  classwise=True,
                  proposal_nums=(100, 300, 1000),
                  largest_max_dets=None,
-                 iou_thrs=np.arange(0.5, 0.96, 0.05)):
+                 iou_thrs=np.arange(0.5, 0.96, 0.05),
+                 waymo_metrics=False):
         """Evaluation in COCO protocol.
 
         Args:
@@ -586,6 +587,14 @@ class WaymoOpenDataset(CustomDataset):
                 break
 
             iou_type = 'bbox' if metric == 'proposal' else metric
+
+            # Fix id first gt
+            if 0 in cocoGt.anns.keys():
+                n_gts = len(cocoGt.anns)
+                ann = cocoGt.anns.pop(0)
+                ann['id'] = n_gts
+                cocoGt.anns[n_gts] = ann
+
             cocoEval = COCOeval(cocoGt, cocoDt, iou_type)
             cocoEval.params.catIds = self.cat_ids
             cocoEval.params.imgIds = self.img_ids
@@ -706,4 +715,7 @@ class WaymoOpenDataset(CustomDataset):
         if tmp_dir is not None:
             tmp_dir.cleanup()
 
-        return eval_results, waymo_iou_metrics
+        if not waymo_metrics:
+            return eval_results
+        else:
+            return eval_results, waymo_iou_metrics

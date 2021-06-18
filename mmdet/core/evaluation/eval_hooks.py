@@ -175,7 +175,8 @@ class EvalHook(Hook):
     def evaluate(self, runner, results):
         eval_res = self.dataloader.dataset.evaluate(
             results, logger=runner.logger, **self.eval_kwargs)
-        for name, val in eval_res.items():
+        # for name, val in eval_res.items():
+        for name, val in eval_res[0].items():
             runner.log_buffer.output[name] = val
         runner.log_buffer.ready = True
         if self.save_best is not None:

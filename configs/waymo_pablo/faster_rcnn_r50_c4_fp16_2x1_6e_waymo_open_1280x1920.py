@@ -6,6 +6,12 @@ _base_ = [
 ]
 # model
 model = dict(
+    rpn_head=dict(
+        anchor_generator=dict(
+            type='AnchorGenerator',
+            scales=[2, 4, 8, 16, 32], # [79.96931511235927, 81.0665157673761, 86.75599299875981, 80.22241783980847, 80.88186230671596]
+            ratios=[1.],
+            strides=[16])),
     roi_head=dict(bbox_head=dict(num_classes=3)),
     train_cfg=dict(
         rpn_proposal=dict(

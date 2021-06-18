@@ -1,4 +1,4 @@
-# anchor_head_LA-C4.py
+#anchor_head_learn_anchors_C4
 
 import torch
 import torch.nn as nn
@@ -105,12 +105,12 @@ class AnchorHead(BaseDenseHead, BBoxTestMixin):
         self.num_anchors = self.anchor_generator.num_base_anchors[0]
 
         self.scales = nn.Parameter(torch.tensor(
-                self.anchor_generator.scales,
+                anchor_generator.scales,
                 dtype=torch.float32,
                 requires_grad=True
             ).log()) # Scales and ratios are log-transformed
         self.ratios = nn.Parameter(torch.tensor(
-                self.anchor_generator.ratios,
+                anchor_generator.ratios,
                 dtype=torch.float32,
                 requires_grad=True
             ).log())
@@ -399,12 +399,15 @@ class AnchorHead(BaseDenseHead, BBoxTestMixin):
         (all_labels, all_label_weights, all_bbox_targets, all_bbox_weights,
          pos_inds_list, neg_inds_list, sampling_results_list) = results[:7]
         rest_results = list(results[7:])  # user-added return values
+
         # no valid anchors
         if any([labels is None for labels in all_labels]):
             return None
+
         # sampled anchors of all images
         num_total_pos = sum([max(inds.numel(), 1) for inds in pos_inds_list])
         num_total_neg = sum([max(inds.numel(), 1) for inds in neg_inds_list])
+        
         # split targets to a list w.r.t. multiple levels
         labels_list = images_to_levels(all_labels, num_level_anchors)
         label_weights_list = images_to_levels(all_label_weights,
@@ -451,8 +454,7 @@ class AnchorHead(BaseDenseHead, BBoxTestMixin):
         # classification loss
         labels = labels.reshape(-1)
         label_weights = label_weights.reshape(-1)
-        cls_score = cls_score.permute(0, 2, 3,
-                                      1).reshape(-1, self.cls_out_channels)
+        cls_score = cls_score.permute(0, 2, 3, 1).reshape(-1, self.cls_out_channels)
         loss_cls = self.loss_cls(
             cls_score, labels, label_weights, avg_factor=num_total_samples)
         # regression loss

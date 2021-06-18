@@ -1,5 +1,4 @@
 import mmcv
-import math
 import numpy as np
 import torch
 from torch.nn.modules.utils import _pair
@@ -139,12 +138,15 @@ class AnchorGenerator(object):
             center = None
             if self.centers is not None:
                 center = self.centers[i]
-            multi_level_base_anchors.append(
-                self.gen_single_level_base_anchors(
+            
+            anchors = self.gen_single_level_base_anchors(
                     base_size,
                     scales=self.scales.exp(), # Undo log conversion
                     ratios=self.ratios.exp(),
-                    center=center))
+                    center=center)
+            #print("ANCHOR GENERATOR BASE ANCHORS:", anchors, "\n")
+
+            multi_level_base_anchors.append(anchors)
         return multi_level_base_anchors
 
     def gen_single_level_base_anchors(self,

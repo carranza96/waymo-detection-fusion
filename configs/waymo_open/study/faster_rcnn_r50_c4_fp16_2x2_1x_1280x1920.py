@@ -1,8 +1,8 @@
 _base_ = [
-    '../_base_/models/faster_rcnn_r50_caffe_c4.py',
-    '../_base_/datasets/waymo_detection_1280x1920.py',
-    '../_base_/schedules/schedule_1x.py',
-    '../_base_/default_runtime.py'
+    '../../_base_/models/faster_rcnn_r50_caffe_c4.py',
+    '../../_base_/datasets/waymo_detection_1280x1920.py',
+    '../../_base_/schedules/schedule_1x.py',
+    '../../_base_/default_runtime.py'
 ]
 # model
 model = dict(
@@ -58,7 +58,7 @@ test_pipeline = [
 ]
 
 data = dict(
-    samples_per_gpu=4,
+    samples_per_gpu=2,
     train=dict(
         type=dataset_type,
         ann_file=data_root + 'annotations/instances_train2020.json',

@@ -4,7 +4,6 @@ from mmdet.datasets import build_dataset
 import torch
 import numpy as np
 from mmcv.ops.nms import nms, soft_nms
-from ensemble_boxes.ensemble_boxes_nms import nms_float_fast
 from time import time
 from numba import jit
 from mean_ap import eval_map, get_cls_results
@@ -94,7 +93,7 @@ if __name__ == "__main__":
     dataset = build_dataset(cfg.data.test)
 
 
-    cfg = {'type': 'nms', 'iou_threshold': 0.7}
+    # cfg = {'type': 'nms', 'iou_threshold': 0.7}
     # cfg = {'type': 'soft_nms', 'iou_threshold': 0.3, 'sigma': 0.5, 'min_score': 1e-3, 'method': 'linear'}
     # cfg = {'type': 'wbf', 'iou_threshold': 0.7}
 

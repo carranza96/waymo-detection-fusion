@@ -49,7 +49,7 @@ def single_gpu_test_two_outputs(model,
     prog_bar = mmcv.ProgressBar(len(dataset))
     for i, data in enumerate(data_loader):
         with torch.no_grad():
-            result, result2 = model(return_loss=False, rescale=True, **data)
+            result, result2 = model(return_loss=False, rescale=True, two_outputs=True, **data)
 
         batch_size = len(result)
         if show or out_dir:

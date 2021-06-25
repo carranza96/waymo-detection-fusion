@@ -18,11 +18,13 @@ from ensemble import ensembleDetections
 from neural_ensemble_utils import postprocess_detections
 import wandb
 import matplotlib.pyplot as plt
+import seaborn as sns
 
 class Fusion(nn.Module):
     def __init__(self):
         super(Fusion, self).__init__()
         self.name = 'fusion_layer'
+        self.mode = 'max'
 
         self.fuse = Sequential(
             nn.Conv2d(9, 18, 1),
@@ -56,9 +58,17 @@ class Fusion(nn.Module):
         T_out[:, :, :] = -9999.
         T_out[:, T_indices[0], T_indices[1]] = x[0, 0, :, :]
 
-        x = self.maxpool(T_out)
-        x2 = self.maxpool2(T_out)
+        if self.mode=='max':
+            x = self.maxpool(T_out)
+            x2 = self.maxpool2(T_out)
+        else:
+            mask = T_out != -9999.
+            x = (T_out*mask).sum(dim=2) / mask.sum(dim=2)
+            x2 = (T_out*mask).sum(dim=1) / mask.sum(dim=1)
+
         return x.squeeze(), x2.squeeze()
+
+
 
 
 
@@ -96,6 +106,12 @@ class EnsembleModel(nn.Module):
             min_pos_iou=0.5,
             match_low_quality=False,
             ignore_iof_thr=-1)
+
+        # assigner=dict(
+        #     type='HungarianAssigner',
+        #     cls_cost=dict(type='ClassificationCost', weight=1.),
+        #     reg_cost=dict(type='BBoxL1Cost', weight=1.0),
+        #     iou_cost=dict(type='IoUCost', iou_mode='giou', weight=1.0))
 
         self.assigner = build_assigner(assigner)
         self.loss_cls = build_loss(loss_cls)
@@ -288,6 +304,10 @@ class EnsembleModel(nn.Module):
             assign_result = self.assigner.assign(
                 torch.tensor(bboxes[i][0]).cuda(), gt_bboxes[i], gt_bboxes_ignore[i],
                 gt_labels[i])
+            # assign_result = self.assigner.assign(
+            #     bbox_pred=torch.tensor(bboxes[i][0]).cuda()[:, :4], cls_pred=torch.unsqueeze(torch.tensor(bboxes[i][0]).cuda()[:, 4], 1),
+            #     gt_bboxes=gt_bboxes[i], gt_bboxes_ignore= gt_bboxes_ignore[i], gt_labels=gt_labels[i],
+            #     img_meta=img_metas[0])
             sampling_result = self.sampler.sample(
                 assign_result,
                 torch.tensor(bboxes[i][0]).cuda(),
@@ -305,7 +325,7 @@ class EnsembleModel(nn.Module):
         bbox_targets[0][order_inds] = original_order
         # bbox_targets_s = (bbox_targets[0][order_inds], bbox_targets[1][order_inds], bbox_targets[2], bbox_targets[3])
 
-        return bbox_targets, sampling_results
+        return bbox_targets, sampling_results, assign_result
 
     @auto_fp16(apply_to=('img', ))
     def forward(self, img, img_metas, return_loss=True, **kwargs):
@@ -349,13 +369,19 @@ class EnsembleModel(nn.Module):
 
         # Calculate overlaps between predictions
         t = time()
-        overlaps = bbox_overlaps(o_vehicles[0][:, :4], o_vehicles[1][:, :4]) # TODO: Calculate with FP16
+        overlaps = bbox_overlaps(o_vehicles[0][:, :4], o_vehicles[1][:, :4])    # TODO: Calculate with FP16
         # print("-----------------------------------")
         # print("BBox overlaps:", time() - t)
 
         t = time()
         scores_1 = o_vehicles[0][:, 4].unsqueeze(1).repeat((1, N))
         scores_2 = o_vehicles[1][:, 4].unsqueeze(1).repeat((1, K)).T
+
+
+        # TODO: Log-likelihood score
+        scores_1 = torch.log(scores_1/(1-scores_1))
+        scores_2 = torch.log(scores_2/(1-scores_2))
+
 
         bboxes_1 = o_vehicles[0][:, :4]
         bboxes_2 = o_vehicles[1][:, :4]
@@ -406,16 +432,17 @@ class EnsembleModel(nn.Module):
 
         t = time()
         # Fill last element of column with all IoU zeros with -1
-        non_overlapping_dets = ~overlaps.sum(dim=0).bool()
+        # non_overlapping_dets = ~overlaps.sum(dim=0).bool()
+        non_overlapping_dets = ~torch.any(torch.greater_equal(T[:, :, 0], 0.2), dim=0)
+
         T[-1, non_overlapping_dets, 0] = -1   # IoU -1
         T[-1, non_overlapping_dets, 1] = -1  # Score Retina -1
         # print("Parte4:", time() - t)
 
         t = time()
         # TODO: Maybe increase threshold to 0.2
-        # non_empty_indices = torch.nonzero(T[:, :, 0])
-        non_empty_indices = torch.nonzero(T[:, :, 0], as_tuple=True)
-        # non_empty_indices = torch.where((torch.greater_equal(T[:, :, 0], 0.2)) | (torch.less(T[:, :, 0], 0)))
+        # non_empty_indices = torch.nonzero(T[:, :, 0], as_tuple=True)
+        non_empty_indices = torch.where((torch.greater_equal(T[:, :, 0], 0.2)) | (torch.less(T[:, :, 0], 0)))
 
         non_empty_elements = T[non_empty_indices[0], non_empty_indices[1], :]
 
@@ -462,14 +489,36 @@ class EnsembleModel(nn.Module):
         x1[0][0] = x1[0][0][x1[0][0][:, 4].argsort()][::-1][:self.n_dets1].copy()
         x2[0][0] = x2[0][0][x2[0][0][:, 4].argsort()][::-1][:self.n_dets2].copy()
 
+        # TODO: Change scores to log-likelihood
         # TODO: Esta parte (Tensor preparation) es muy lenta
         t = time()
         T, T_out, non_empty_elements_T, non_empty_indices = self.create_T(x1, x2, [img_metas])
         # print("Tensor preparation:", time() - t)
 
+
         # Fusion network
         t = time()
         fusion_scores1, fusion_scores2 = self.fusion(non_empty_elements_T, T_out, non_empty_indices)
+
+        # m = nn.Sigmoid()
+        # fusion_scores_2n = []
+        # for i in range(1000):
+        #     if i == 221:
+        #         print()
+        #     tout = T_out[0, T_out[0, :, i] > -10, i]
+        #     t_overlap_ind = torch.where(T_out[0, :, i] > -10)[0]
+        #     t0 = T[t_overlap_ind, i]
+        #     ind02 = torch.where(t0[:, 0] > 0.2)[0]
+        #     tout_filt = tout[ind02]
+        #     res = m(tout_filt.mean())
+        #     if res.isnan():
+        #         fusion_scores_2n.append(m(fusion_scores2[i]))
+        #     else:
+        #         fusion_scores_2n.append(res)
+        # fusion_scores_2n = torch.tensor(fusion_scores_2n).cuda()
+        #
+        # fusion_scores2 = torch.log(fusion_scores_2n/(1-fusion_scores_2n))
+
         # print("Fusion:", time() - t)
         # TODO: Uncomment
         # x1[0][0][:, 4] = new_scores.cpu().detach().numpy()
@@ -478,12 +527,13 @@ class EnsembleModel(nn.Module):
         # Filter GT bboxes of class 0 (vehicles)
         gt_bboxes_vehicles = [bb[gt_labels[i] == 0] for i, bb in enumerate(gt_bboxes)]
         gt_labels_vehicles = [lab[lab == 0] for lab in gt_labels]
-        bbox_targets1, sampling_results1 = self.get_bbox_targets(x1, gt_bboxes_vehicles, gt_labels_vehicles, gt_bboxes_ignore, img_metas)
-        bbox_targets2, sampling_results2 = self.get_bbox_targets(x2, gt_bboxes_vehicles, gt_labels_vehicles, gt_bboxes_ignore, img_metas)
+        bbox_targets1, sampling_results1, assign_result1 = self.get_bbox_targets(x1, gt_bboxes_vehicles, gt_labels_vehicles, gt_bboxes_ignore, img_metas)
+        bbox_targets2, sampling_results2, assign_result2 = self.get_bbox_targets(x2, gt_bboxes_vehicles, gt_labels_vehicles, gt_bboxes_ignore, img_metas)
 
 
         # cls_score = torch.tensor(1 - x1[0][0][:, 4], requires_grad=True).cuda()
         # cls_score = 1 - new_scores
+        old_scores1 = torch.tensor(x1[0][0][:, 4]).cuda().clone()
         old_scores = torch.tensor(x2[0][0][:, 4]).cuda().clone()
         cls_score = fusion_scores2
         cls_score = torch.unsqueeze(cls_score, 1)
@@ -494,6 +544,9 @@ class EnsembleModel(nn.Module):
         loss_bbox2 = self.loss(torch.unsqueeze(fusion_scores1, 1), *bbox_targets1)
         if loss_bbox['loss_cls'] > 1:
             print()
+
+        loss_bbox['loss_cls'] = loss_bbox['loss_cls'] #+ loss_bbox2['loss_cls']
+        # TODO: Para añadir el loss del primer detector hay que controlar los boxes que no tienen overlapping con el detector 2
         losses.update(loss_bbox)
 
         # Check loss and compare
@@ -501,7 +554,7 @@ class EnsembleModel(nn.Module):
         loss_bbox_prev = self.loss(torch.unsqueeze(inv_sigmoid, 1), *bbox_targets) # Only uses first two items of bbox_targets
         # loss_bbox_prev = self.loss(old_scores, *bbox_targets) # Only uses first two items of bbox_targets
         label, _ = self._expand_onehot_labels(bbox_targets[0], bbox_targets[1], 1)
-            # TODO: Check loss is calculated correctly
+        # TODO: Check loss is calculated correctly
         loss_prev_ce = nn.functional.binary_cross_entropy(torch.unsqueeze(old_scores, 1), label.float(), reduction='mean')
         loss_new_ce = nn.functional.binary_cross_entropy_with_logits(cls_score, label.float(), reduction='mean')
         # print(loss_bbox)
@@ -517,15 +570,15 @@ class EnsembleModel(nn.Module):
         # Individual losses
         # loss_per_det = nn.functional.binary_cross_entropy_with_logits(cls_score, label.float(), reduction='none')
         # max_loss_ind = torch.where(loss_per_det == loss_per_det.max())[0]
-
-        # Plot image
+        # #
+        # # Plot image
         # image = self.get_image(img, img_metas)
-        #
+        # #
         # gts = gt_bboxes[0].detach().cpu().numpy()
         # labs = gt_labels[0].detach().cpu().numpy()
-        # imshow_det_bboxes(image, gts, labs)
-
-
+        # # imshow_det_bboxes(image, gts, labs)
+        # #
+        # #
         # max_loss = loss_per_det[max_loss_ind]
         # m = nn.Sigmoid()
         # max_loss_old_sc = old_scores[max_loss_ind]
@@ -540,11 +593,24 @@ class EnsembleModel(nn.Module):
         # print()
         #
         # t_out = T_out[0, :, max_loss_ind]
-        # t_out[t_out > -10]
+        # t_out[t_out > -100]
         # t = T[:, max_loss_ind].squeeze(1)
-        # t_overlap = t[t[:, 0] > 0]
+        # t_overlap = t[t[:, 0] > 0.2]
         # imshow_det_bboxes(image, np.concatenate((np.expand_dims(max_loss_bbox, 0), np.expand_dims(target_gt, 0))), np.array([0, 1]), show=False)
         # imshow_det_bboxes(image, np.expand_dims(max_loss_bbox, 0), np.array([0]), show=False)
+        #
+        #
+        # i = max_loss_ind[0]
+        # # i = 434
+        # # i = 250
+        # tout = T_out[0, T_out[0, :, i] > -10, i]
+        # t_overlap_ind = torch.where(T_out[0, :, i] > -10)[0]
+        # t0 = T[t_overlap_ind, i]
+        # ind02 = torch.where(t0[:, 0] > 0.2)[0]
+        # tout_filt = tout[ind02]
+        # plt.figure()
+        # sns.scatterplot(t0[:, 0].detach().cpu().numpy(), tout.detach().cpu().numpy())
+
 
         # o_last = T_out[0][-1]
         # a = x1[0][0][-1]
@@ -566,7 +632,7 @@ class EnsembleModel(nn.Module):
 
         return losses
 
-    def forward_test(self, img, img_metas, proposals=None, rescale=False):
+    def forward_test(self, img, img_metas, proposals=None, rescale=False, two_outputs=False):
 
         # if not isinstance(img, list):
         #     img, img_metas = [img], [img_metas]
@@ -591,6 +657,23 @@ class EnsembleModel(nn.Module):
         m = nn.Sigmoid()
         sc1 = m(fusion_scores1)
         sc2 = m(fusion_scores2)
+
+
+        # fusion_scores_2n = []
+        # for i in range(1000):
+        #     tout = T_out[0, T_out[0, :, i] > -10, i]
+        #     t_overlap_ind = torch.where(T_out[0, :, i] > -10)[0]
+        #     t0 = T[t_overlap_ind, i]
+        #     ind02 = torch.where(t0[:, 0] > 0.2)[0]
+        #     tout_filt = tout[ind02]
+        #     res = m(tout_filt.mean())
+        #     if res.isnan():
+        #         fusion_scores_2n.append(m(fusion_scores2[i]))
+        #     else:
+        #         fusion_scores_2n.append(res)
+        # fusion_scores_2n = torch.tensor(fusion_scores_2n).cuda()
+        # sc2 = fusion_scores_2n
+
         x1old = deepcopy(x1)
         x1[0][0][:, 4] = sc1.cpu()
         x2[0][0][:, 4] = sc2.cpu()
@@ -618,14 +701,18 @@ class EnsembleModel(nn.Module):
 
         # imshow_det_bboxes(image, np.concatenate((box[np.newaxis, :], box2[np.newaxis,:])), np.array([0,0]), show=False)
 
-        # return x1, x2
         # Postprocess predictions
-        score_th = 0.05
-        nms_cfg = {'type': 'nms', 'iou_threshold': 0.5}
-        max_dets_class = 100
+        if not two_outputs:
+            score_th = 0.05
+            nms_cfg = {'type': 'nms', 'iou_threshold': 0.5}
+            max_dets_class = 100
 
-        x2 = postprocess_detections(x2, score_th, nms_cfg, max_dets_class)
-        return x2
+            x2 = postprocess_detections(x2, score_th, nms_cfg, max_dets_class)
+            return x2
+
+        else:
+            return x1, x2
+
 
     # from mmdet.models.roi_head.bbox_heads.bbox_head
     @force_fp32(apply_to=('cls_score', 'bbox_pred'))

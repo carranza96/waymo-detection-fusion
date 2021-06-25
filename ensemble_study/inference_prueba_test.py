@@ -410,6 +410,7 @@ class EnsembleModel(nn.Module):
     def pred(self, model, img, img_metas, device):
         img.to('cuda:1')
         return model([img], [img_metas])
+
     def forward_train(self,
                       img,
                       img_metas,
@@ -902,8 +903,8 @@ def single_gpu_test(model,
 if __name__ == '__main__':
     # os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 
-    config_file = 'saved_models/study/faster_rcnn_r50_fpn_fp16_4x1_3e_1280x1920/faster_rcnn_r50_fpn_fp16_4x1_3e_1280x1920.py'
-    checkpoint_file = 'saved_models/study/faster_rcnn_r50_fpn_fp16_4x1_3e_1280x1920/latest.pth'
+    config_file = 'saved_models/study/faster_rcnn_r50_fpn_fp16_4x2_1x_1280x1920/faster_rcnn_r50_fpn_fp16_4x2_1x_1280x1920.py'
+    checkpoint_file = 'saved_models/study/faster_rcnn_r50_fpn_fp16_4x2_1x_1280x1920/latest.pth'
     device = 'cuda:1'
 
     # init a detector
@@ -912,8 +913,8 @@ if __name__ == '__main__':
 
     model1 = model
 
-    config_file = 'saved_models/study/retinanet_r50_fpn_fp16_4x1_3e_1280x1920/retinanet_r50_fpn_fp16_4x1_3e_1280x1920.py'
-    checkpoint_file = 'saved_models/study/retinanet_r50_fpn_fp16_4x1_3e_1280x1920/latest.pth'
+    config_file = 'saved_models/study/retinanet_r50_fpn_fp16_4x2_1x_1280x1920/retinanet_r50_fpn_fp16_4x2_1x_1280x1920.py'
+    checkpoint_file = 'saved_models/study/retinanet_r50_fpn_fp16_4x2_1x_1280x1920/latest.pth'
     # config_file = 'saved_models/study/cascade_rcnn_r50_fpn_fp16_2x1_3e_1280x1920/cascade_rcnn_r50_fpn_fp16_2x1_3e_1280x1920.py'
     # checkpoint_file = 'saved_models/study/cascade_rcnn_r50_fpn_fp16_2x1_3e_1280x1920/latest.pth'
     model2 = init_detector(config_file, checkpoint_file, device='cuda:0')
@@ -922,7 +923,7 @@ if __name__ == '__main__':
     model = MMDataParallel(model, device_ids=[0]) # Esto mete el modelo Ensemble en la GPU
     cfg.seed = None
 
-    model.load_state_dict(torch.load("ensemble_newfeat_0.2.pth"))
+    # model.load_state_dict(torch.load("ensemble_newfeat_0.2.pth"))
 
     # l = torch.load("ensemble.pth")
     # for key in list(l.keys()):

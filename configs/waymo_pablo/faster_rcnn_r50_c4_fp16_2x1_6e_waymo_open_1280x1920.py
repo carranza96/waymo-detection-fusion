@@ -1,9 +1,11 @@
+
 _base_ = [
     '../_base_/models/faster_rcnn_r50_caffe_c4.py',
     '../_base_/datasets/waymo_detection_1280x1920.py',
     '../_base_/schedules/schedule_1x.py',
     '../_base_/default_runtime.py'
 ]
+
 # model
 model = dict(
     rpn_head=dict(
@@ -29,9 +31,9 @@ model = dict(
     )
 )
 
+# dataset
 dataset_type = 'WaymoOpenDataset'
-data_root = '../waymococo_f0/'
-
+data_root = 'data/waymococo_f0/' # '../waymococo_f0/'
 
 # use caffe img_norm
 img_norm_cfg = dict(
@@ -47,6 +49,7 @@ train_pipeline = [
     dict(type='DefaultFormatBundle'),
     dict(type='Collect', keys=['img', 'gt_bboxes', 'gt_labels']),
 ]
+
 test_pipeline = [
     dict(type='LoadImageFromFile'),
     dict(
@@ -81,8 +84,6 @@ data = dict(
         img_prefix=data_root + 'val2020/',
         pipeline=test_pipeline))
 
-
-
 # LR is set for a batch size of 8
 optimizer = dict(type='SGD', lr=0.0025, momentum=0.9, weight_decay=0.0001)
 optimizer_config = dict(grad_clip=None)
@@ -94,12 +95,13 @@ lr_config = dict(
     warmup_iters=500,
     warmup_ratio=0.001,
     step=[3, 5])
-total_epochs = 6
-runner = dict(type='EpochBasedRunner', max_epochs=6)
+
+runner = dict(type='EpochBasedRunner', max_epochs=200) #6)
 
 # load_from = 'https://s3.ap-northeast-2.amazonaws.com/open-mmlab/mmdetection/models/faster_rcnn_r50_c4_2x-6e4fdf4f.pth'
 # load_from = 'https://s3.ap-northeast-2.amazonaws.com/open-mmlab/mmdetection/models/faster_rcnn_r50_caffe_c4_2x-71c67f27.pth'
-load_from = 'saved_models/pretrained/faster_rcnn_r50_caffe_c4_2x-71c67f27_mod.pth'
+#load_from = 'saved_models/pretrained/faster_rcnn_r50_caffe_c4_2x-71c67f27_mod.pth' # <==
+load_from = 'saved_models/FRCNN-C4-normal_001/faster_rcnn_r50_c4_fp16_2x1_6e_waymo_open_1280x1920/epoch_6.pth'
 
 # fp16 settings
 fp16 = dict(loss_scale=512.)

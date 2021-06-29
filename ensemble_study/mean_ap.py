@@ -378,7 +378,7 @@ def eval_map(det_results,
     pool = Pool(nproc)
     eval_results = []
     for i in range(1):
-        iou_thr_c = iou_thr if i!=0 else 0.7
+        iou_thr_c = iou_thr #if i!=0 else 0.7
         # get gt and det bboxes of this class
         cls_dets, cls_gts, cls_gts_ignore = get_cls_results(
             det_results, annotations, i)

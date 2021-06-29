@@ -16,12 +16,12 @@ from curves import score_th_results, pr_curves
 log_wandb = False
 train = False
 load_saved_preds = True
-ensemble_checkpoint = 'ensembleinv/epoch_1.pth'
+ensemble_checkpoint = 'ensemblemax/epoch_1.pth'
 # ensemble_checkpoint = None
-work_dir = 'ensembleinv/'
+work_dir = 'ensemblemax/'
 pkl_path = work_dir + 'results.pkl'
-# base_models_names = ['retinanet_r50_fpn_fp16_4x2_1x_1280x1920', 'faster_rcnn_r50_fpn_fp16_4x2_1x_1280x1920']
-base_models_names = ['faster_rcnn_r50_fpn_fp16_4x2_1x_1280x1920', 'retinanet_r50_fpn_fp16_4x2_1x_1280x1920']
+base_models_names = ['retinanet_r50_fpn_fp16_4x2_1x_1280x1920', 'faster_rcnn_r50_fpn_fp16_4x2_1x_1280x1920']
+# base_models_names = ['faster_rcnn_r50_fpn_fp16_4x2_1x_1280x1920', 'retinanet_r50_fpn_fp16_4x2_1x_1280x1920']
 
 # base_models_names = ['faster_rcnn_r50_fpn_fp16_4x2_1x_1280x1920', 'faster_rcnn_r50_fpn_fp16_4x2_1x_1280x1920_flip_test']
 

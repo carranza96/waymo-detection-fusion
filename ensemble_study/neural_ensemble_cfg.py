@@ -79,6 +79,7 @@ data = dict(
         # ann_file='data/waymococo_f0/annotations/instances_train2020.json',
         # img_prefix='data/waymococo_f0/train2020/',
         ann_file='data/waymococo_f0/annotations/instances_val2020_sample2000.json',
+        # ann_file='data/waymococo_f0/annotations/instances_val2020.json',
         # ann_file='data/waymococo_f0/annotations/instances_val2020_example.json',
         img_prefix='data/waymococo_f0/val2020/',
         test_mode=True,

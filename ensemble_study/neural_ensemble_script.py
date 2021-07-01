@@ -14,14 +14,14 @@ from mmcv.runner import wrap_fp16_model, load_checkpoint
 from curves import score_th_results, pr_curves
 
 log_wandb = False
-train = False
+train = True
 load_saved_preds = True
-ensemble_checkpoint = 'ensemblemax/epoch_1.pth'
-# ensemble_checkpoint = None
-work_dir = 'ensemblemax/'
+# ensemble_checkpoint = 'ensemblemax/epoch_1.pth'
+ensemble_checkpoint = None
+work_dir = 'ensembleinv/'
 pkl_path = work_dir + 'results.pkl'
-base_models_names = ['retinanet_r50_fpn_fp16_4x2_1x_1280x1920', 'faster_rcnn_r50_fpn_fp16_4x2_1x_1280x1920']
-# base_models_names = ['faster_rcnn_r50_fpn_fp16_4x2_1x_1280x1920', 'retinanet_r50_fpn_fp16_4x2_1x_1280x1920']
+# base_models_names = ['retinanet_r50_fpn_fp16_4x2_1x_1280x1920', 'faster_rcnn_r50_fpn_fp16_4x2_1x_1280x1920']
+base_models_names = ['faster_rcnn_r50_fpn_fp16_4x2_1x_1280x1920', 'retinanet_r50_fpn_fp16_4x2_1x_1280x1920']
 
 # base_models_names = ['faster_rcnn_r50_fpn_fp16_4x2_1x_1280x1920', 'faster_rcnn_r50_fpn_fp16_4x2_1x_1280x1920_flip_test']
 
@@ -79,8 +79,8 @@ if train:
     # dataset = torch.utils.data.Subset(dataset, [54369])
     # dataset = torch.utils.data.Subset(dataset, [29822])
     # dataset.flag = np.array([1], dtype=np.uint8)
-    dataset = torch.utils.data.Subset(dataset, torch.arange(0, 2000))
-    dataset.flag = np.ones(2000, dtype=np.uint8)
+    # dataset = torch.utils.data.Subset(dataset, torch.arange(0, 2000))
+    # dataset.flag = np.ones(2000, dtype=np.uint8)
 
     train_detector(model, dataset, cfg, validate=True)
 

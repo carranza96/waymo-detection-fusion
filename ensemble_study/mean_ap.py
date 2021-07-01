@@ -451,10 +451,10 @@ def eval_map(det_results,
             'fp':  fp_list,
             'fp_redundant': fp_redundant,
             'gt_covered':  gt_covered,
-            'dets_iou_max': dets_iou_max, 
+            'dets_iou_max': dets_iou_max,
             'dets_iou_argmax': dets_iou_argmax,
             'dets_matched_class': dets_matched_class,
-            'gts_iou_max': gt_iou_max, 
+            'gts_iou_max': gt_iou_max,
             'gts_iou_argmax': gt_iou_argmax
         })
     pool.close()

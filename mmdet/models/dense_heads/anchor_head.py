@@ -399,6 +399,7 @@ class AnchorHead(BaseDenseHead, BBoxTestMixin):
         label_weights = label_weights.reshape(-1)
         cls_score = cls_score.permute(0, 2, 3,
                                       1).reshape(-1, self.cls_out_channels)
+        # num_total_samples = cls_score.size(0)
         loss_cls = self.loss_cls(
             cls_score, labels, label_weights, avg_factor=num_total_samples)
         # regression loss
@@ -736,6 +737,10 @@ class AnchorHead(BaseDenseHead, BBoxTestMixin):
                 Defaults to False.
 
         Returns:
-            list[ndarray]: bbox results of each class
+            list[tuple[Tensor, Tensor]]: Each item in result_list is 2-tuple.
+                The first item is ``bboxes`` with shape (n, 5), where
+                5 represent (tl_x, tl_y, br_x, br_y, score).
+                The shape of the second tensor in the tuple is ``labels``
+                with shape (n,), The length of list should always be 1.
         """
         return self.aug_test_bboxes(feats, img_metas, rescale=rescale)

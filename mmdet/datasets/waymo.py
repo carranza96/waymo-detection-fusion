@@ -552,7 +552,7 @@ class WaymoOpenDataset(CustomDataset):
             if metric not in allowed_metrics:
                 raise KeyError(f'metric {metric} is not supported')
 
-        # self.format_results(results, outfile_prefix, format_type='waymo')
+        self.format_results(results, outfile_prefix, format_type='waymo')
 
         result_files, tmp_dir = self.format_results(
             results, outfile_prefix, format_type='coco')

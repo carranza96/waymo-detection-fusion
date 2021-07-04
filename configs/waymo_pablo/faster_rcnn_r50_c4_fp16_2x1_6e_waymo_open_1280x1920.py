@@ -11,7 +11,7 @@ model = dict(
     rpn_head=dict(
         anchor_generator=dict(
             type='AnchorGenerator',
-            scales=[2, 4, 8, 16, 32], # [79.96931511235927, 81.0665157673761, 86.75599299875981, 80.22241783980847, 80.88186230671596]
+            scales=[0.5, 0.75, 1, 2, 6], # Original: [2, 4, 8, 16, 32],
             ratios=[1.],
             strides=[16])),
     roi_head=dict(bbox_head=dict(num_classes=3)),
@@ -33,7 +33,7 @@ model = dict(
 
 # dataset
 dataset_type = 'WaymoOpenDataset'
-data_root = 'data/waymococo_f0/' # '../waymococo_f0/'
+data_root = 'data/waymococo_f0/' # Real dataset: '../waymococo_f0/'
 
 # use caffe img_norm
 img_norm_cfg = dict(
@@ -43,7 +43,7 @@ train_pipeline = [
     dict(type='LoadImageFromFile'),
     dict(type='LoadAnnotations', with_bbox=True),
     dict(type='Resize', img_scale=(1280, 1920), keep_ratio=True),
-    dict(type='RandomFlip', flip_ratio=0.5),
+    dict(type='RandomFlip', flip_ratio=0.), # Original: 0.5),
     dict(type='Normalize', **img_norm_cfg),
     dict(type='Pad', size_divisor=32),
     dict(type='DefaultFormatBundle'),
@@ -69,10 +69,18 @@ test_pipeline = [
 data = dict(
     samples_per_gpu=2,
     train=dict(
-        type=dataset_type,
-        ann_file=data_root + 'annotations/instances_train2020.json',
-        img_prefix=data_root + 'train2020/',
-        pipeline=train_pipeline),
+        type='RepeatDataset',
+        times=1000,
+        dataset=dict(
+            type=dataset_type,
+            ann_file=data_root + 'annotations/instances_train2020.json',
+            img_prefix=data_root + 'train2020/',
+            pipeline=train_pipeline)),
+    # train=dict( # Original
+    #     type=dataset_type,
+    #     ann_file=data_root + 'annotations/instances_train2020.json',
+    #     img_prefix=data_root + 'train2020/',
+    #     pipeline=train_pipeline),
     val=dict(
         type=dataset_type,
         ann_file=data_root + 'annotations/instances_val2020.json',
@@ -85,23 +93,28 @@ data = dict(
         pipeline=test_pipeline))
 
 # LR is set for a batch size of 8
-optimizer = dict(type='SGD', lr=0.0025, momentum=0.9, weight_decay=0.0001)
+optimizer = dict(type='SGD', lr=0.05, momentum=0.9, weight_decay=0.0001) # Original: lr=0.0025
 optimizer_config = dict(grad_clip=None)
 
 # Learning policy
 lr_config = dict(
     policy='step',
-    warmup='linear',
-    warmup_iters=500,
-    warmup_ratio=0.001,
-    step=[3, 5])
+    warmup='constant')
 
-runner = dict(type='EpochBasedRunner', max_epochs=200) #6)
+# Original Learning policy:
+# lr_config = dict(
+#     policy='step',
+#     warmup='linear',
+#     warmup_iters=500,
+#     warmup_ratio=0.001,
+#     step=[3, 5])
+
+runner = dict(type='EpochBasedRunner', max_epochs=6)
 
 # load_from = 'https://s3.ap-northeast-2.amazonaws.com/open-mmlab/mmdetection/models/faster_rcnn_r50_c4_2x-6e4fdf4f.pth'
 # load_from = 'https://s3.ap-northeast-2.amazonaws.com/open-mmlab/mmdetection/models/faster_rcnn_r50_caffe_c4_2x-71c67f27.pth'
 #load_from = 'saved_models/pretrained/faster_rcnn_r50_caffe_c4_2x-71c67f27_mod.pth' # <==
-load_from = 'saved_models/FRCNN-C4-normal_001/faster_rcnn_r50_c4_fp16_2x1_6e_waymo_open_1280x1920/epoch_6.pth'
+load_from = 'saved_models/pretrained/c4_1ar.pth'
 
 # fp16 settings
 fp16 = dict(loss_scale=512.)

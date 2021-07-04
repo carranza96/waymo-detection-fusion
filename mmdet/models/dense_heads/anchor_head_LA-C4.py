@@ -67,6 +67,7 @@ class AnchorHead(BaseDenseHead, BBoxTestMixin):
         self.use_sigmoid_cls = loss_cls.get('use_sigmoid', False)
 
         self.log_count = 0
+        self.warmUp = 1500
 
         self.dateAndTime = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
@@ -192,10 +193,10 @@ class AnchorHead(BaseDenseHead, BBoxTestMixin):
                 valid_flag_list (list[Tensor]): Valid flags of each image.
         """
 
-        # TODO: Implement better the following lines
+        # Update self.anchor_generator with the learnt scales and ratios
         self.anchor_generator = build_anchor_generator(dict(
             type='AnchorGenerator',
-            scales=self.scales, #.clone().cpu().detach().numpy(),
+            scales=self.scales,
             ratios=self.ratios,
             strides=self.anchor_generator.strides,
             base_sizes=self.anchor_generator.base_sizes
@@ -205,6 +206,7 @@ class AnchorHead(BaseDenseHead, BBoxTestMixin):
         # Write in log file
         self.log_anchors()
         self.log_count += 1
+        self.warmUp = self.warmUp-1 if self.warmUp > 0 else 0
 
         num_imgs = len(img_metas)
 
@@ -440,7 +442,7 @@ class AnchorHead(BaseDenseHead, BBoxTestMixin):
                 (N, num_total_anchors).
             label_weights (Tensor): Label weights of each anchor with shape
                 (N, num_total_anchors)
-            bbox_targets (Tensor): BBox regression targets of each anchor wight
+            bbox_targets (Tensor): BBox regression targets of each anchor with
                 shape (N, num_total_anchors, 4).
             bbox_weights (Tensor): BBox regression loss weights of each anchor
                 with shape (N, num_total_anchors, 4).
@@ -451,13 +453,15 @@ class AnchorHead(BaseDenseHead, BBoxTestMixin):
         Returns:
             dict[str, Tensor]: A dictionary of loss components.
         """
-        # classification loss
+
+        # Classification loss
         labels = labels.reshape(-1)
         label_weights = label_weights.reshape(-1)
         cls_score = cls_score.permute(0, 2, 3, 1).reshape(-1, self.cls_out_channels)
         loss_cls = self.loss_cls(
             cls_score, labels, label_weights, avg_factor=num_total_samples)
-        # regression loss
+        
+        # Regression loss
         bbox_targets = bbox_targets.reshape(-1, 4)
         bbox_weights = bbox_weights.reshape(-1, 4)
         bbox_pred = bbox_pred.permute(0, 2, 3, 1).reshape(-1, 4)
@@ -467,11 +471,22 @@ class AnchorHead(BaseDenseHead, BBoxTestMixin):
             # decodes the already encoded coordinates to absolute format.
             anchors = anchors.reshape(-1, 4)
             bbox_pred = self.bbox_coder.decode(anchors, bbox_pred)
+
         loss_bbox = self.loss_bbox(
             bbox_pred,
             bbox_targets,
             bbox_weights,
             avg_factor=num_total_samples)
+
+        if self.warmUp > 0:
+            # Soft assignment warm-up
+            # T = 2 * self.warmUp / 1500
+            # A = num_anchors_por_pos = len(ratios) * len(scales)
+            # Habría que agrupar los bbox_weights en grupos de tamaño A y aplicarles softmax...
+
+            # Online clustering warm-up
+            loss_bbox += self.warmUp / 1500 * torch.sum(bbox_weights * bbox_targets**2) / num_total_samples
+        
         return loss_cls, loss_bbox
 
     @force_fp32(apply_to=('cls_scores', 'bbox_preds'))

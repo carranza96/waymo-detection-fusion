@@ -12,6 +12,8 @@ from .base_dense_head import BaseDenseHead
 from .dense_test_mixins import BBoxTestMixin
 
 from datetime import datetime
+from math import exp
+
 
 @HEADS.register_module()
 class AnchorHead(BaseDenseHead, BBoxTestMixin):
@@ -67,9 +69,21 @@ class AnchorHead(BaseDenseHead, BBoxTestMixin):
         self.use_sigmoid_cls = loss_cls.get('use_sigmoid', False)
 
         self.log_count = 0
-        self.warmUp = 1500
 
-        self.dateAndTime = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        dateAndTime = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        self.log_path = f"saved_models/waymo_pablo/faster_rcnn_r50_c4_fp16_2x1_6e_waymo_open_1280x1920/anchors_log_{dateAndTime}_exp.csv"
+        log_header = ""
+        for i in range(len(anchor_generator.ratios)):
+            log_header += f"ratios-{i};"
+        for i in range(len(anchor_generator.scales)):
+            log_header += f"scales-{i};"
+        for i in range(len(anchor_generator.ratios)):
+            log_header += f"ratios-grad-{i};"
+        for i in range(len(anchor_generator.scales)):
+            log_header += f"scales-grad-{i};"
+        with open(self.log_path, "w") as f:
+            f.write(log_header[:-1] + "\n")
+            #"ratios;scales-0;scales-1;scales-2;scales-3;scales-4;ratios-grad;scales-grad-0;scales-grad-1;scales-grad-2;scales-grad-3;scales-grad-4\n")
 
         # TODO better way to determine whether sample or not
         self.sampling = loss_cls['type'] not in [
@@ -164,19 +178,17 @@ class AnchorHead(BaseDenseHead, BBoxTestMixin):
         '''Write anchor ratios and scales to log file.'''
 
         if self.log_count%10 == 1:
-            # print(
-            #     "<RATIOS>", self.ratios.clone().cpu().detach().numpy(),
-            #     "<SCALES>", self.scales.clone().cpu().detach().numpy(),
-            #     "<RATIOS GRAD>", self.ratios.grad, #.cpu().detach().numpy(),
-            #     "<SCALES GRAD>", self.scales.grad, #.cpu().detach().numpy(),
-            # )
+            ls =  list(self.ratios.clone().cpu().detach().numpy())
+            ls += list(self.scales.clone().cpu().detach().numpy())
+            ls += list(self.ratios.grad.cpu().detach().numpy())
+            ls += list(self.scales.grad.cpu().detach().numpy())
 
-            log =  "<RATIOS>" + str(self.ratios.clone().cpu().detach().numpy()) + " "
-            log += "<SCALES>" + str(self.scales.clone().cpu().detach().numpy()) + " "
-            log += "<RATIOS GRAD>" + str(self.ratios.grad.cpu().detach().numpy()) + " "
-            log += "<SCALES GRAD>" + str(self.scales.grad.cpu().detach().numpy()) + "\n"
+            log = str(exp(ls.pop(0)))
+            for e in ls:
+                log += ';' + str(exp(e))
+            log += '\n'
 
-            with open(f"log_pablo/anchors_log_{self.dateAndTime}.txt", "a+") as f:
+            with open(self.log_path, "a+") as f:
                 f.write(log)
 
     def get_anchors(self, featmap_sizes, img_metas, device='cuda'):

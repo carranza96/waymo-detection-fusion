@@ -15,6 +15,45 @@ from datetime import datetime
 from math import exp
 
 
+def visualize_bboxes(sampling_result, gt_bboxes, filename):
+    import numpy as np
+    import matplotlib.pyplot as plt
+    import matplotlib.patches as mpatches
+
+    from mmdet.core.bbox.transforms import bbox_xyxy_to_cxcywh
+
+
+    img = np.ones((1280,1920))
+    fig, ax = plt.subplots()
+    ax.imshow(img, cmap='binary')
+
+    # Add all positive bboxes
+    ans = bbox_xyxy_to_cxcywh(sampling_result.pos_bboxes[-3:]).cpu().detach().numpy()
+    for a in ans:
+        r = mpatches.Rectangle(
+                ((a[0] - a[2]/2), (a[1]- a[3]/2)),
+                a[2],
+                a[3],
+                linewidth=1, edgecolor='r', facecolor='none')
+        ax.add_artist(r)	
+
+    # Add gt with id=12
+    #gt = bbox_xyxy_to_cxcywh(gt_bboxes[0]).cpu().detach().numpy() # gt_bboxes[12]
+
+    # Add all gts
+    gts = bbox_xyxy_to_cxcywh(gt_bboxes).cpu().detach().numpy()
+    for gt in gts:
+        r = mpatches.Rectangle(
+                ((gt[0] - gt[2]/2), (gt[1]- gt[3]/2)),
+                gt[2],
+                gt[3],
+                linewidth=1, edgecolor='b', facecolor='none')
+        ax.add_artist(r)
+
+    #plt.show()
+    plt.savefig(f"saved_models/waymo_pablo/faster_rcnn_r50_c4_fp16_2x1_6e_waymo_open_1280x1920/{filename}")
+
+
 @HEADS.register_module()
 class AnchorHead(BaseDenseHead, BBoxTestMixin):
     """Anchor-based head (RPN, RetinaNet, SSD, etc.).
@@ -287,6 +326,13 @@ class AnchorHead(BaseDenseHead, BBoxTestMixin):
             anchors, gt_bboxes, gt_bboxes_ignore,
             None if self.sampling else gt_labels)
         sampling_result = self.sampler.sample(assign_result, anchors, gt_bboxes)
+
+        plot_control = True
+        if self.log_count%250==0 and plot_control:
+            plot_control = False
+            visualize_bboxes(sampling_result, gt_bboxes, f"plot_log_{self.log_count}")
+        else:
+            plot_control = True
 
         num_valid_anchors = anchors.shape[0]
         bbox_targets = torch.zeros_like(anchors)

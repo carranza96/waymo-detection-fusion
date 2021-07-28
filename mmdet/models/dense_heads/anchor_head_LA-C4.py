@@ -108,6 +108,7 @@ class AnchorHead(BaseDenseHead, BBoxTestMixin):
         self.use_sigmoid_cls = loss_cls.get('use_sigmoid', False)
 
         self.log_count = 0
+        self.warmUp = 1500
 
         dateAndTime = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         self.log_path = f"saved_models/waymo_pablo/faster_rcnn_r50_c4_fp16_2x1_6e_waymo_open_1280x1920/anchors_log_{dateAndTime}_exp.csv"

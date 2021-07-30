@@ -7,7 +7,7 @@ from .builder import ANCHOR_GENERATORS
 
 
 @ANCHOR_GENERATORS.register_module()
-class AnchorGenerator(object):
+class AnchorGenerator_LA(object):
     """Standard anchor generator for 2D anchor-based detectors.
 
     Args:
@@ -37,15 +37,15 @@ class AnchorGenerator(object):
             width and height. By default it is 0 in V2.0.
 
     Examples:
-        >>> from mmdet.core import AnchorGenerator
-        >>> self = AnchorGenerator([16], [1.], [1.], [9])
+        >>> from mmdet.core import AnchorGenerator_LA
+        >>> self = AnchorGenerator_LA([16], [1.], [1.], [9])
         >>> all_anchors = self.grid_anchors([(2, 2)], device='cpu')
         >>> print(all_anchors)
         [tensor([[-4.5000, -4.5000,  4.5000,  4.5000],
                 [11.5000, -4.5000, 20.5000,  4.5000],
                 [-4.5000, 11.5000,  4.5000, 20.5000],
                 [11.5000, 11.5000, 20.5000, 20.5000]])]
-        >>> self = AnchorGenerator([16, 32], [1.], [1.], [9, 18])
+        >>> self = AnchorGenerator_LA([16, 32], [1.], [1.], [9, 18])
         >>> all_anchors = self.grid_anchors([(2, 2), (1, 1)], device='cpu')
         >>> print(all_anchors)
         [tensor([[-4.5000, -4.5000,  4.5000,  4.5000],
@@ -144,7 +144,6 @@ class AnchorGenerator(object):
                     scales=self.scales.exp(), # Undo log conversion
                     ratios=self.ratios.exp(),
                     center=center)
-            #print("ANCHOR GENERATOR BASE ANCHORS:", anchors, "\n")
 
             multi_level_base_anchors.append(anchors)
         return multi_level_base_anchors
@@ -357,7 +356,7 @@ class AnchorGenerator(object):
 
 
 @ANCHOR_GENERATORS.register_module()
-class SSDAnchorGenerator(AnchorGenerator):
+class SSDAnchorGenerator_LA(AnchorGenerator_LA):
     """Anchor generator for SSD.
 
     Args:
@@ -422,7 +421,7 @@ class SSDAnchorGenerator(AnchorGenerator):
                                  'or 0.15 when input_size is 512, got'
                                  f' {basesize_ratio_range[0]}.')
         else:
-            raise ValueError('Only support 300 or 512 in SSDAnchorGenerator'
+            raise ValueError('Only support 300 or 512 in SSDAnchorGenerator_LA'
                              f', got {self.input_size}.')
 
         anchor_ratios = []
@@ -481,7 +480,7 @@ class SSDAnchorGenerator(AnchorGenerator):
 
 
 @ANCHOR_GENERATORS.register_module()
-class LegacyAnchorGenerator(AnchorGenerator):
+class LegacyAnchorGenerator_LA(AnchorGenerator_LA):
     """Legacy anchor generator used in MMDetection V1.x.
 
     Note:
@@ -518,8 +517,8 @@ class LegacyAnchorGenerator(AnchorGenerator):
             in v1.x models.
 
     Examples:
-        >>> from mmdet.core import LegacyAnchorGenerator
-        >>> self = LegacyAnchorGenerator(
+        >>> from mmdet.core import LegacyAnchorGenerator_LA
+        >>> self = LegacyAnchorGenerator_LA(
         >>>     [16], [1.], [1.], [9], center_offset=0.5)
         >>> all_anchors = self.grid_anchors(((2, 2),), device='cpu')
         >>> print(all_anchors)
@@ -580,11 +579,11 @@ class LegacyAnchorGenerator(AnchorGenerator):
 
 
 @ANCHOR_GENERATORS.register_module()
-class LegacySSDAnchorGenerator(SSDAnchorGenerator, LegacyAnchorGenerator):
+class LegacySSDAnchorGenerator_LA(SSDAnchorGenerator_LA, LegacyAnchorGenerator_LA):
     """Legacy anchor generator used in MMDetection V1.x.
 
-    The difference between `LegacySSDAnchorGenerator` and `SSDAnchorGenerator`
-    can be found in `LegacyAnchorGenerator`.
+    The difference between `LegacySSDAnchorGenerator_LA` and `SSDAnchorGenerator_LA`
+    can be found in `LegacyAnchorGenerator_LA`.
     """
 
     def __init__(self,
@@ -593,7 +592,7 @@ class LegacySSDAnchorGenerator(SSDAnchorGenerator, LegacyAnchorGenerator):
                  basesize_ratio_range,
                  input_size=300,
                  scale_major=True):
-        super(LegacySSDAnchorGenerator,
+        super(LegacySSDAnchorGenerator_LA,
               self).__init__(strides, ratios, basesize_ratio_range, input_size,
                              scale_major)
         self.centers = [((stride - 1) / 2., (stride - 1) / 2.)
@@ -602,7 +601,7 @@ class LegacySSDAnchorGenerator(SSDAnchorGenerator, LegacyAnchorGenerator):
 
 
 @ANCHOR_GENERATORS.register_module()
-class YOLOAnchorGenerator(AnchorGenerator):
+class YOLOAnchorGenerator_LA(AnchorGenerator_LA):
     """Anchor generator for YOLO.
 
     Args:

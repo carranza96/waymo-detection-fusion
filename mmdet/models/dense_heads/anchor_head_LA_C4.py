@@ -55,7 +55,7 @@ def visualize_bboxes(sampling_result, gt_bboxes, filename):
 
 
 @HEADS.register_module()
-class AnchorHead(BaseDenseHead, BBoxTestMixin):
+class AnchorHead_LA(BaseDenseHead, BBoxTestMixin):
     """Anchor-based head (RPN, RetinaNet, SSD, etc.).
 
     Args:
@@ -82,7 +82,7 @@ class AnchorHead(BaseDenseHead, BBoxTestMixin):
                  in_channels,
                  feat_channels=256,
                  anchor_generator=dict(
-                     type='AnchorGenerator',
+                     type='AnchorGenerator_LA',
                      scales=[8, 16, 32],
                      ratios=[0.5, 1.0, 2.0],
                      strides=[4, 8, 16, 32, 64]),
@@ -101,7 +101,7 @@ class AnchorHead(BaseDenseHead, BBoxTestMixin):
                  train_cfg=None,
                  test_cfg=None,
                  init_cfg=dict(type='Normal', layers='Conv2d', std=0.01)):
-        super(AnchorHead, self).__init__(init_cfg)
+        super(AnchorHead_LA, self).__init__(init_cfg)
         self.in_channels = in_channels
         self.num_classes = num_classes
         self.feat_channels = feat_channels
@@ -247,7 +247,7 @@ class AnchorHead(BaseDenseHead, BBoxTestMixin):
 
         # Update self.anchor_generator with the learnt scales and ratios
         self.anchor_generator = build_anchor_generator(dict(
-            type='AnchorGenerator',
+            type='AnchorGenerator_LA',
             scales=self.scales,
             ratios=self.ratios,
             strides=self.anchor_generator.strides,
@@ -654,11 +654,11 @@ class AnchorHead(BaseDenseHead, BBoxTestMixin):
 
         Example:
             >>> import mmcv
-            >>> self = AnchorHead(
+            >>> self = AnchorHead_LA(
             >>>     num_classes=9,
             >>>     in_channels=1,
             >>>     anchor_generator=dict(
-            >>>         type='AnchorGenerator',
+            >>>         type='AnchorGenerator_LA',
             >>>         scales=[8],
             >>>         ratios=[0.5, 1.0, 2.0],
             >>>         strides=[4,]))

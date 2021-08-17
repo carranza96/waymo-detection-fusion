@@ -28,7 +28,7 @@ def visualize_bboxes(sampling_result, gt_bboxes, filename):
     ax.imshow(img, cmap='binary')
 
     # Add all positive bboxes
-    ans = bbox_xyxy_to_cxcywh(sampling_result.pos_bboxes[-3:]).cpu().detach().numpy()
+    ans = bbox_xyxy_to_cxcywh(sampling_result.pos_bboxes).cpu().detach().numpy()
     for a in ans:
         r = mpatches.Rectangle(
                 ((a[0] - a[2]/2), (a[1]- a[3]/2)),
@@ -51,7 +51,7 @@ def visualize_bboxes(sampling_result, gt_bboxes, filename):
         ax.add_artist(r)
 
     #plt.show()
-    plt.savefig(f"saved_models/waymo_pablo/faster_rcnn_r50_c4_fp16_2x1_6e_waymo_open_1280x1920/{filename}")
+    plt.savefig(f"saved_models/waymo_pablo/faster_rcnn_r50_c4_fp16_2x1_6e_waymo_open_1280x1920_LA/{filename}")
 
 
 @HEADS.register_module()
@@ -110,8 +110,9 @@ class AnchorHead_LA(BaseDenseHead, BBoxTestMixin):
         self.log_count = 0
         self.warmUp = 1500
 
+        # Create log file
         dateAndTime = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        self.log_path = f"saved_models/waymo_pablo/faster_rcnn_r50_c4_fp16_2x1_6e_waymo_open_1280x1920/anchors_log_{dateAndTime}_exp.csv"
+        self.log_path = f"saved_models/waymo_pablo/faster_rcnn_r50_c4_fp16_2x1_6e_waymo_open_1280x1920_LA/anchors_log_{dateAndTime}_exp.csv"
         log_header = ""
         for i in range(len(anchor_generator.ratios)):
             log_header += f"ratios-{i};"
@@ -123,7 +124,6 @@ class AnchorHead_LA(BaseDenseHead, BBoxTestMixin):
             log_header += f"scales-grad-{i};"
         with open(self.log_path, "w") as f:
             f.write(log_header[:-1] + "\n")
-            #"ratios;scales-0;scales-1;scales-2;scales-3;scales-4;ratios-grad;scales-grad-0;scales-grad-1;scales-grad-2;scales-grad-3;scales-grad-4\n")
 
         # TODO better way to determine whether sample or not
         self.sampling = loss_cls['type'] not in [

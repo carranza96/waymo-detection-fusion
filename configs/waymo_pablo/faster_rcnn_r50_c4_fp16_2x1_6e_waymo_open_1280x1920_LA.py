@@ -12,8 +12,11 @@ model = dict(
         type='RPNHead_LA',
         anchor_generator=dict(
             type='AnchorGenerator_LA',
-            scales=[4., 8.],
-            ratios=[0.25, 3.],
+            # 4 GTS::
+            # ids = [  22,   14,   12,   10]
+            # Ideales: [1.503, 2.899, 5.193, 6.097], Alterados: [1.25, 3.50, 4.30, 7.30]
+            scales=[0.70, 1.30, 2.30],
+            ratios=[0.40, 0.70, 1.80],
             strides=[16])),
     roi_head=dict(bbox_head=dict(num_classes=3)),
     train_cfg=dict(
@@ -74,7 +77,7 @@ data = dict(
         times=1000,
         dataset=dict(
             type=dataset_type,
-            ann_file=data_root + 'annotations/instances_train2020_2gt.json',
+            ann_file=data_root + 'annotations/instances_train2020_22gt.json',
             img_prefix=data_root + 'train2020/',
             pipeline=train_pipeline)),
     # train=dict( # Original
@@ -97,18 +100,51 @@ data = dict(
 optimizer = dict(type='SGD', lr=0.075, momentum=0.9, weight_decay=0.0001) # Original: lr=0.0025
 optimizer_config = dict(grad_clip=None)
 
-# Learning policy
-lr_config = dict(
-    policy='step',
-    warmup='constant')
+# # Learning policy
+# lr_config = dict(
+#     policy='step',
+#     warmup='constant')
 
-# Original Learning policy:
+# # Original Learning policy:
 # lr_config = dict(
 #     policy='step',
 #     warmup='linear',
 #     warmup_iters=500,
 #     warmup_ratio=0.001,
 #     step=[3, 5])
+
+# New learning policy
+lr_config = dict(
+    policy='step',
+    warmup='linear',
+    warmup_iters=1000, # batches
+    warmup_ratio=0.001,
+    step=[1, 3])
+
+# # without warmup
+# lr_config = dict(
+#     policy='step',
+#     warmup=None,    # <---      CAMBIO       <-----
+#     warmup_iters=0) # batches
+
+# Args:
+#   by_epoch (bool): LR changes epoch by epoch
+#   warmup (string): Type of warmup used. It can be None(use no warmup),
+#       'constant', 'linear' or 'exp'
+#   warmup_iters (int): The number of iterations or epochs that warmup
+#       lasts
+#   warmup_ratio (float): LR used at the beginning of warmup equals to
+#       warmup_ratio * initial_lr
+#   warmup_by_epoch (bool): When warmup_by_epoch == True, warmup_iters
+#       means the number of epochs that warmup lasts, otherwise means the
+#       number of iteration that warmup lasts
+#
+# Default:
+#   by_epoch=True,
+#   warmup=None,
+#   warmup_iters=0,
+#   warmup_ratio=0.1,
+#   warmup_by_epoch=False
 
 runner = dict(type='EpochBasedRunner', max_epochs=6)
 

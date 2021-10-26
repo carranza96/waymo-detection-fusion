@@ -521,7 +521,9 @@ class WaymoOpenDataset(CustomDataset):
                  proposal_nums=(100, 300, 1000),
                  largest_max_dets=None,
                  iou_thrs=np.arange(0.5, 0.96, 0.05),
-                 waymo_metrics=False):
+                 waymo_metrics=False,
+                 time_of_day=None,
+                 weather=None):
         """Evaluation in COCO protocol.
 
         Args:
@@ -594,6 +596,45 @@ class WaymoOpenDataset(CustomDataset):
                 ann = cocoGt.anns.pop(0)
                 ann['id'] = n_gts
                 cocoGt.anns[n_gts] = ann
+
+            if time_of_day: # Day, Night, Dawn/Dusk
+                filt_imgs = [k for k, v in cocoGt.imgs.items() if v['time_of_day'] == time_of_day]
+                cocoGt.imgToAnns = {
+                    imgId: anns
+                    for (imgId, anns) in cocoGt.imgToAnns.items() if imgId in filt_imgs
+                }
+                #
+                anns = {k: v for (k, v) in cocoGt.anns.items() if v['image_id'] in filt_imgs}
+                cocoGt.anns = anns
+
+
+                cocoDt.imgToAnns = {
+                    imgId: anns
+                    for (imgId, anns) in cocoDt.imgToAnns.items() if imgId in filt_imgs
+                }
+                #
+                anns = {k: v for (k, v) in cocoDt.anns.items() if v['image_id'] in filt_imgs}
+                cocoDt.anns = anns
+
+            if weather: # rain, sunny
+                filt_imgs = [k for k, v in cocoGt.imgs.items() if v['weather'] == weather]
+                cocoGt.imgToAnns = {
+                    imgId: anns
+                    for (imgId, anns) in cocoGt.imgToAnns.items() if imgId in filt_imgs
+                }
+                #
+                anns = {k: v for (k, v) in cocoGt.anns.items() if v['image_id'] in filt_imgs}
+                cocoGt.anns = anns
+
+
+                cocoDt.imgToAnns = {
+                    imgId: anns
+                    for (imgId, anns) in cocoDt.imgToAnns.items() if imgId in filt_imgs
+                }
+                #
+                anns = {k: v for (k, v) in cocoDt.anns.items() if v['image_id'] in filt_imgs}
+                cocoDt.anns = anns
+
 
             cocoEval = COCOeval(cocoGt, cocoDt, iou_type)
             cocoEval.params.catIds = self.cat_ids

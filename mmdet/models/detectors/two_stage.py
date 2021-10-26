@@ -1,6 +1,7 @@
 import warnings
 
 import torch
+import torch.nn
 
 from ..builder import DETECTORS, build_backbone, build_head, build_neck
 from .base import BaseDetector
@@ -29,6 +30,10 @@ class TwoStageDetector(BaseDetector):
                           'please use "init_cfg" instead')
             backbone.pretrained = pretrained
         self.backbone = build_backbone(backbone)
+        # self.convy = torch.nn.Conv2d(1, 3, 1) 
+        # self.convfpn = torch.nn.Conv2d(512, 256, 1)
+        self.conv1x1 = torch.nn.Conv2d(4, 3, 1) 
+        self.relu = torch.nn.ReLU() 
 
         if neck is not None:
             self.neck = build_neck(neck)
@@ -63,10 +68,23 @@ class TwoStageDetector(BaseDetector):
 
     def extract_feat(self, img):
         """Directly extract features from the backbone+neck."""
+        img = self.conv1x1(img)
+        img = self.relu(img) 
         x = self.backbone(img)
+        # y = self.relu(self.convy(img[:,3:,:,:]))
+        # x = self.backbone(img[:,0:3,:,:])
+        # y = self.backbone(y)
         if self.with_neck:
             x = self.neck(x)
+        #     y = self.neck(y)
+        # z = ()
+        # for i in range(len(x)):
+        #     w = torch.cat((x[i], torch.mul(y[i], 1.0/(i+1))),1)
+        #     z = z + (self.relu(self.convfpn(w)),)
+        # z = torch.cat(x, y, 1)
+        # z = self.relu(self.conv1x1(z))
         return x
+        # return z
 
     def forward_dummy(self, img):
         """Used for computing network flops.

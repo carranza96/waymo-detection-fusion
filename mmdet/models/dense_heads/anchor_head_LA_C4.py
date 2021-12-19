@@ -10,48 +10,14 @@ from mmdet.core import (anchor_inside_flags, build_anchor_generator,
 from ..builder import HEADS, build_loss
 from .base_dense_head import BaseDenseHead
 from .dense_test_mixins import BBoxTestMixin
+from mmdet.core.bbox.iou_calculators import build_iou_calculator
+from mmdet.core.bbox.transforms import bbox_xyxy_to_cxcywh
 
 from datetime import datetime
 from math import exp
-
-
-def visualize_bboxes(sampling_result, gt_bboxes, filename):
-    import numpy as np
-    import matplotlib.pyplot as plt
-    import matplotlib.patches as mpatches
-
-    from mmdet.core.bbox.transforms import bbox_xyxy_to_cxcywh
-
-
-    img = np.ones((1280,1920))
-    fig, ax = plt.subplots()
-    ax.imshow(img, cmap='binary')
-
-    # Add all positive bboxes
-    ans = bbox_xyxy_to_cxcywh(sampling_result.pos_bboxes).cpu().detach().numpy()
-    for a in ans:
-        r = mpatches.Rectangle(
-                ((a[0] - a[2]/2), (a[1]- a[3]/2)),
-                a[2],
-                a[3],
-                linewidth=1, edgecolor='r', facecolor='none')
-        ax.add_artist(r)	
-
-    # Add gt with id=12
-    #gt = bbox_xyxy_to_cxcywh(gt_bboxes[0]).cpu().detach().numpy() # gt_bboxes[12]
-
-    # Add all gts
-    gts = bbox_xyxy_to_cxcywh(gt_bboxes).cpu().detach().numpy()
-    for gt in gts:
-        r = mpatches.Rectangle(
-                ((gt[0] - gt[2]/2), (gt[1]- gt[3]/2)),
-                gt[2],
-                gt[3],
-                linewidth=1, edgecolor='b', facecolor='none')
-        ax.add_artist(r)
-
-    #plt.show()
-    plt.savefig(f"saved_models/waymo_pablo/faster_rcnn_r50_c4_fp16_2x1_6e_waymo_open_1280x1920_LA/{filename}")
+import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
 
 
 @HEADS.register_module()
@@ -109,10 +75,16 @@ class AnchorHead_LA(BaseDenseHead, BBoxTestMixin):
 
         self.log_count = 0
         self.warmUp = 1500
+        self.warmUpCount = self.warmUp
 
         # Create log file
-        dateAndTime = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        self.log_path = f"saved_models/waymo_pablo/faster_rcnn_r50_c4_fp16_2x1_6e_waymo_open_1280x1920_LA/anchors_log_{dateAndTime}_exp.csv"
+        self.dateAndTime = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        self.log_path = f"saved_models/waymo_pablo"
+        #self.log_path = f"manuel"
+        self.anchors_log_path = f"{self.log_path}/{self.dateAndTime}_anchors_log_exp.csv"
+
+        self.iou_measures = (0,0,0,0)
+
         log_header = ""
         for i in range(len(anchor_generator.ratios)):
             log_header += f"ratios-{i};"
@@ -122,10 +94,10 @@ class AnchorHead_LA(BaseDenseHead, BBoxTestMixin):
             log_header += f"ratios-grad-{i};"
         for i in range(len(anchor_generator.scales)):
             log_header += f"scales-grad-{i};"
-        with open(self.log_path, "w") as f:
-            f.write(log_header[:-1] + "\n")
+        log_header += "num_positive_anchors;num_gts_with_anchor_assigned;mean_iou_best_each_gt;mean_iou_positives"
+        with open(self.anchors_log_path, "w") as f:
+            f.write(log_header + "\n")
 
-        # TODO better way to determine whether sample or not
         self.sampling = loss_cls['type'] not in [
             'FocalLoss', 'GHMC', 'QualityFocalLoss'
         ]
@@ -169,6 +141,18 @@ class AnchorHead_LA(BaseDenseHead, BBoxTestMixin):
                 dtype=torch.float32,
                 requires_grad=True
             ).log())
+        
+        # Update anchor_generator to introduce log-version of scales and ratios
+        self.anchor_generator = build_anchor_generator(dict(
+            type='AnchorGenerator_LA',
+            scales=self.scales,
+            ratios=self.ratios,
+            strides=self.anchor_generator.strides,
+            base_sizes=self.anchor_generator.base_sizes
+            )
+        )
+
+        self.iou_calculator = build_iou_calculator(dict(type='BboxOverlaps2D'))
 
         self._init_layers()
 
@@ -214,6 +198,34 @@ class AnchorHead_LA(BaseDenseHead, BBoxTestMixin):
         """
         return multi_apply(self.forward_single, feats)
 
+    def visualize_bboxes(self, sampling_result, gt_bboxes):
+
+        img = np.ones((1280,1920))
+        fig, ax = plt.subplots()
+        ax.imshow(img, cmap='binary')
+
+        # Add all positive bboxes
+        ans = bbox_xyxy_to_cxcywh(sampling_result.pos_bboxes).cpu().detach().numpy()
+        for a in ans:
+            r = mpatches.Rectangle(
+                    ((a[0] - a[2]/2), (a[1]- a[3]/2)),
+                    a[2],
+                    a[3],
+                    linewidth=1, edgecolor='r', facecolor='none')
+            ax.add_artist(r)
+
+        # Add all gts
+        gts = bbox_xyxy_to_cxcywh(gt_bboxes).cpu().detach().numpy()
+        for gt in gts:
+            r = mpatches.Rectangle(
+                    ((gt[0] - gt[2]/2), (gt[1]- gt[3]/2)),
+                    gt[2],
+                    gt[3],
+                    linewidth=1, edgecolor='b', facecolor='none')
+            ax.add_artist(r)
+
+        plt.savefig(f"{self.log_path}/{self.dateAndTime}_LA_plot_log_{self.log_count}")
+
     def log_anchors(self):
         '''Write anchor ratios and scales to log file.'''
 
@@ -225,10 +237,12 @@ class AnchorHead_LA(BaseDenseHead, BBoxTestMixin):
 
             log = str(exp(ls.pop(0)))
             for e in ls:
-                log += ';' + str(exp(e))
+                log += f';{exp(e):.15f}'
+            for e in self.iou_measures:
+                log += f';{e}'
             log += '\n'
 
-            with open(self.log_path, "a+") as f:
+            with open(self.anchors_log_path, "a+") as f:
                 f.write(log)
 
     def get_anchors(self, featmap_sizes, img_metas, device='cuda'):
@@ -258,7 +272,7 @@ class AnchorHead_LA(BaseDenseHead, BBoxTestMixin):
         # Write in log file
         self.log_anchors()
         self.log_count += 1
-        self.warmUp = self.warmUp-1 if self.warmUp > 0 else 0
+        self.warmUpCount = self.warmUpCount-1 if self.warmUpCount > 0 else 0
 
         num_imgs = len(img_metas)
 
@@ -323,17 +337,40 @@ class AnchorHead_LA(BaseDenseHead, BBoxTestMixin):
         # assign gt and sample anchors
         anchors = flat_anchors[inside_flags, :]
 
+        # Assign result returns two things: 
+        # - gt_inds: value 0 for background, value 1 for object (depending on thresholds of MaxIoUAssigner(0.7/0.3))
+        # - max_overlaps
         assign_result = self.assigner.assign(
             anchors, gt_bboxes, gt_bboxes_ignore,
             None if self.sampling else gt_labels)
+
         sampling_result = self.sampler.sample(assign_result, anchors, gt_bboxes)
 
-        plot_control = True
-        if self.log_count%250==0 and plot_control:
-            plot_control = False
-            visualize_bboxes(sampling_result, gt_bboxes, f"plot_log_{self.log_count}")
-        else:
-            plot_control = True
+        # IoU Calculation
+        # TODO: This comparison is anchors vs gt. We also need to do final bbox
+        #   preds vs. gts (so that we can also use it in validation as another
+        #   metric)
+        
+        # overlaps contains the IOU between every gt and every anchor
+        overlaps = self.iou_calculator(gt_bboxes, anchors)
+
+        # For each anchor, the max iou of all gts
+        # For each anchor, which gt best overlaps with it
+        # max_overlaps, argmax_overlaps = overlaps.max(dim=0)
+        
+        # For each gt, the max iou of all proposals
+        # For each gt, which anchor best overlaps with it
+        gt_max_overlaps, gt_argmax_overlaps = overlaps.max(dim=1)
+
+        positive_anchors_inds = torch.where(assign_result.gt_inds>0)[0] # TODO: es igual a pos_inds?
+        num_positive_anchors = positive_anchors_inds.shape[0]
+        num_gts_with_anchor_assigned = torch.unique(sampling_result.pos_assigned_gt_inds).shape[0]
+
+        mean_iou_best_each_gt = torch.mean(gt_max_overlaps)
+        mean_iou_positives =  torch.mean(assign_result.max_overlaps[positive_anchors_inds])
+
+        if (self.log_count%250==0 or self.log_count==1):
+            self.visualize_bboxes(sampling_result, gt_bboxes)
 
         num_valid_anchors = anchors.shape[0]
         bbox_targets = torch.zeros_like(anchors)
@@ -379,7 +416,9 @@ class AnchorHead_LA(BaseDenseHead, BBoxTestMixin):
             bbox_weights = unmap(bbox_weights, num_total_anchors, inside_flags)
 
         return (labels, label_weights, bbox_targets, bbox_weights, pos_inds,
-                neg_inds, sampling_result)
+                neg_inds, sampling_result, num_positive_anchors,
+                num_gts_with_anchor_assigned, mean_iou_best_each_gt,
+                mean_iou_positives)
 
     def get_targets(self,
                     anchor_list,
@@ -459,7 +498,19 @@ class AnchorHead_LA(BaseDenseHead, BBoxTestMixin):
             unmap_outputs=unmap_outputs)
         (all_labels, all_label_weights, all_bbox_targets, all_bbox_weights,
          pos_inds_list, neg_inds_list, sampling_results_list) = results[:7]
-        rest_results = list(results[7:])  # user-added return values
+        num_positive_anchors_list = results[7]
+        num_gts_with_anchor_assigned_list = results[8]
+        mean_iou_best_each_gt_list = results[9]
+        mean_iou_positives_list = results[10]
+        rest_results = list(results[11:])  # user-added return values
+
+        # update self.iou_measures
+        self.iou_measures = (
+            sum(num_positive_anchors_list) / len(num_positive_anchors_list),
+            sum(num_gts_with_anchor_assigned_list) / len(num_gts_with_anchor_assigned_list),
+            sum(mean_iou_best_each_gt_list) / len(mean_iou_best_each_gt_list),
+            sum(mean_iou_positives_list) / len(mean_iou_positives_list)
+        )
 
         # no valid anchors
         if any([labels is None for labels in all_labels]):
@@ -530,6 +581,7 @@ class AnchorHead_LA(BaseDenseHead, BBoxTestMixin):
             # decodes the already encoded coordinates to absolute format.
             anchors = anchors.reshape(-1, 4)
             bbox_pred = self.bbox_coder.decode(anchors, bbox_pred)
+            # TODO
 
         loss_bbox = self.loss_bbox(
             bbox_pred,
@@ -544,7 +596,7 @@ class AnchorHead_LA(BaseDenseHead, BBoxTestMixin):
             # Habría que agrupar los bbox_weights en grupos de tamaño A y aplicarles softmax...
 
             # Online clustering warm-up
-            loss_bbox += self.warmUp / 1500 * torch.sum(bbox_weights * bbox_targets**2) / num_total_samples
+            loss_bbox += self.warmUpCount / self.warmUp * torch.sum(bbox_weights * bbox_targets**2) / (2*num_total_samples)
         
         return loss_cls, loss_bbox
 

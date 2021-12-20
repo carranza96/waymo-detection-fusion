@@ -9,13 +9,10 @@ _base_ = [
 # model
 model = dict(
     rpn_head=dict(
-        type='RPNHead_LA',
+        type='RPNHead',
         anchor_generator=dict(
-            type='AnchorGenerator_LA',
-            # 4 GTS::
-            # ids = [  22,   14,   12,   10]
-            # Ideales: [1.503, 2.899, 5.193, 6.097], Alterados: [1.25, 3.50, 4.30, 7.30]
-            scales=[0.70, 1.30, 2.30],
+            type='AnchorGenerator',
+            scales=[0.70, 2.30, 5.50],
             ratios=[0.40, 0.70, 1.80],
             strides=[16])),
     roi_head=dict(bbox_head=dict(num_classes=3)),
@@ -37,7 +34,7 @@ model = dict(
 
 # dataset
 dataset_type = 'WaymoOpenDataset'
-data_root = 'data/waymococo_f0/' # Real dataset: '../waymococo_f0/'
+data_root = '../waymococo_f0/' # Fake dataset: 'data/waymococo_f0/', Real dataset:
 
 # use caffe img_norm
 img_norm_cfg = dict(
@@ -73,18 +70,10 @@ test_pipeline = [
 data = dict(
     samples_per_gpu=2,
     train=dict(
-        type='RepeatDataset',
-        times=1000,
-        dataset=dict(
-            type=dataset_type,
-            ann_file=data_root + 'annotations/instances_train2020_22gt.json',
-            img_prefix=data_root + 'train2020/',
-            pipeline=train_pipeline)),
-    # train=dict( # Original
-    #     type=dataset_type,
-    #     ann_file=data_root + 'annotations/instances_train2020.json',
-    #     img_prefix=data_root + 'train2020/',
-    #     pipeline=train_pipeline),
+        type=dataset_type,
+        ann_file=data_root + 'annotations/instances_train2020.json',
+        img_prefix=data_root + 'train2020/',
+        pipeline=train_pipeline),
     val=dict(
         type=dataset_type,
         ann_file=data_root + 'annotations/instances_val2020.json',
@@ -97,35 +86,16 @@ data = dict(
         pipeline=test_pipeline))
 
 # LR is set for a batch size of 8
-optimizer = dict(type='SGD', lr=0.075, momentum=0.9, weight_decay=0.0001) # Original: lr=0.0025
+optimizer = dict(type='SGD', lr=0.0025, momentum=0.9, weight_decay=0.0001) # Original: lr=0.0025
 optimizer_config = dict(grad_clip=None)
 
-# # Learning policy
-# lr_config = dict(
-#     policy='step',
-#     warmup='constant')
-
-# # Original Learning policy:
-# lr_config = dict(
-#     policy='step',
-#     warmup='linear',
-#     warmup_iters=500,
-#     warmup_ratio=0.001,
-#     step=[3, 5])
-
-# New learning policy
+# Learning policy
 lr_config = dict(
     policy='step',
     warmup='linear',
-    warmup_iters=1000, # batches
+    warmup_iters=500,
     warmup_ratio=0.001,
-    step=[1, 3])
-
-# # without warmup
-# lr_config = dict(
-#     policy='step',
-#     warmup=None,    # <---      CAMBIO       <-----
-#     warmup_iters=0) # batches
+    step=[3, 5])
 
 # Args:
 #   by_epoch (bool): LR changes epoch by epoch

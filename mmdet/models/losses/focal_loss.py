@@ -238,8 +238,8 @@ class FocalLoss(nn.Module):
                 gamma=self.gamma,
                 alpha=self.alpha,
                 reduction=reduction,
-                avg_factor=avg_factor,
-                threshold=self.threshold)
+                avg_factor=avg_factor,)
+                # threshold=self.threshold)
 
         else:
             raise NotImplementedError

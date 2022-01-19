@@ -74,8 +74,8 @@ class TwoStageDetector(BaseDetector):
         # y = self.relu(self.convy(img[:,3:,:,:]))
         # x = self.backbone(img[:,0:3,:,:])
         # y = self.backbone(y)
-        if self.with_neck:
-            x = self.neck(x)
+        # if self.with_neck:
+        #     x = self.neck(x)
         #     y = self.neck(y)
         # z = ()
         # for i in range(len(x)):

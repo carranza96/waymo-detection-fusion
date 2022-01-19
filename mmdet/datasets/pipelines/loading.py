@@ -162,11 +162,11 @@ class LoadMultiChannelImageFromFiles:
         else:
             filename = results['img_info']['filename']
 
-        filename[1] = filename[1].replace("lidar","lidar_enet_1280x1920_git_u16")
+        filename[1] = filename[1].replace("lidar","_lidar_enet_352x1216_Simple_u16")
         img = []
         for name in filename:
             img_bytes = self.file_client.get(name)
-            if "lidar_enet_1280x1920_git_u16" in name:
+            if "_lidar_enet_352x1216_Simple_u16" in name:
                 img.append(mmcv.imfrombytes(img_bytes, flag=self.color_type) / 256)
             else:
                 img.append(mmcv.imfrombytes(img_bytes, flag=self.color_type))

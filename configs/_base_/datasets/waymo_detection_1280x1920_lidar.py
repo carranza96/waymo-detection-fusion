@@ -2,7 +2,7 @@ dataset_type = 'WaymoOpenDataset'
 data_root = '/home/manuel/Escritorio/mmdetection/data/waymococo_f0/'
 # data_root = '/home/javgal/mmdetection/data/waymococo_f0/'
 img_norm_cfg = dict(
-    mean=[123.675, 116.28, 103.53,  15.892], std=[58.395, 57.12, 57.375, 13.732], to_rgb=True)
+    mean=[123.675, 116.28, 103.53,  14.143], std=[58.395, 57.12, 57.375, 12.33], to_rgb=True)
 train_pipeline = [
     dict(type='LoadMultiChannelImageFromFiles'),
     dict(type='LoadAnnotations', with_bbox=True),

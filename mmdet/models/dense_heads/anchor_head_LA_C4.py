@@ -556,9 +556,8 @@ class AnchorHead_LA(BaseDenseHead, BBoxTestMixin):
                 shape (N, num_total_anchors, 4).
             bbox_weights (Tensor): BBox regression loss weights of each anchor
                 with shape (N, num_total_anchors, 4).
-            num_total_samples (int): If sampling, num total samples equal to
-                the number of total anchors; Otherwise, it is the number of
-                positive anchors.
+            num_total_samples (int): If sampling, it equal to the number of
+                total anchors; Otherwise, it is the number of positive anchors.
 
         Returns:
             dict[str, Tensor]: A dictionary of loss components.
@@ -581,7 +580,6 @@ class AnchorHead_LA(BaseDenseHead, BBoxTestMixin):
             # decodes the already encoded coordinates to absolute format.
             anchors = anchors.reshape(-1, 4)
             bbox_pred = self.bbox_coder.decode(anchors, bbox_pred)
-            # TODO
 
         loss_bbox = self.loss_bbox(
             bbox_pred,
@@ -589,15 +587,20 @@ class AnchorHead_LA(BaseDenseHead, BBoxTestMixin):
             bbox_weights,
             avg_factor=num_total_samples)
 
-        if self.warmUp > 0:
+        if self.warmUpCount > 0:
+            lambdaa = self.warmUpCount / self.warmUp
+
             # Soft assignment warm-up
-            # T = 2 * self.warmUp / 1500
-            # A = num_anchors_por_pos = len(ratios) * len(scales)
-            # Habría que agrupar los bbox_weights en grupos de tamaño A y aplicarles softmax...
+            T = 2 * lambdaa
+            A = len(self.ratios) * len(self.scales)  # Number of anchors in each position
+            softmax_d1 = torch.nn.Softmax(dim=1)
+            bbox_weights = -bbox_targets.abs().sum(dim=1) / T
+            bbox_weights = (softmax_d1(bbox_weights.reshape(-1,A))).reshape(-1)  # Group by position, apply softmax and ungroup back
+            bbox_weights = torch.stack(4*[bbox_weights], dim=1)  # Copy the same weights for all four terms: xyxy
 
             # Online clustering warm-up
-            loss_bbox += self.warmUpCount / self.warmUp * torch.sum(bbox_weights * bbox_targets**2) / (2*num_total_samples)
-        
+            loss_bbox += lambdaa * torch.sum(bbox_weights * bbox_targets**2) / (2*torch.sum(bbox_weights))
+
         return loss_cls, loss_bbox
 
     @force_fp32(apply_to=('cls_scores', 'bbox_preds'))

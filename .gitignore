@@ -130,3 +130,4 @@ plots/
 log*
 DetVisGUI/*
 manuel/
+configs/waymo_pablo_multi-lr

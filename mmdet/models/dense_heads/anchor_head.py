@@ -9,6 +9,44 @@ from ..builder import HEADS, build_loss
 from .base_dense_head import BaseDenseHead
 from .dense_test_mixins import BBoxTestMixin
 
+from datetime import datetime
+
+
+def visualize_bboxes(sampling_result, gt_bboxes, filename, time):
+    import numpy as np
+    import matplotlib.pyplot as plt
+    import matplotlib.patches as mpatches
+
+    from mmdet.core.bbox.transforms import bbox_xyxy_to_cxcywh
+
+
+    img = np.ones((1280,1920))
+    fig, ax = plt.subplots()
+    ax.imshow(img, cmap='binary')
+
+    # Add all positive bboxes
+    ans = bbox_xyxy_to_cxcywh(sampling_result.pos_bboxes).cpu().detach().numpy()
+    for a in ans:
+        r = mpatches.Rectangle(
+                ((a[0] - a[2]/2), (a[1]- a[3]/2)),
+                a[2],
+                a[3],
+                linewidth=1, edgecolor='r', facecolor='none')
+        ax.add_artist(r)
+
+    # Add all gts
+    gts = bbox_xyxy_to_cxcywh(gt_bboxes).cpu().detach().numpy()
+    for gt in gts:
+        r = mpatches.Rectangle(
+                ((gt[0] - gt[2]/2), (gt[1]- gt[3]/2)),
+                gt[2],
+                gt[3],
+                linewidth=1, edgecolor='b', facecolor='none')
+        ax.add_artist(r)
+
+    #plt.show()
+    plt.savefig(f"saved_models/waymo_pablo/{time}_NLA_{filename}")
+
 
 @HEADS.register_module()
 class AnchorHead(BaseDenseHead, BBoxTestMixin):
@@ -62,6 +100,10 @@ class AnchorHead(BaseDenseHead, BBoxTestMixin):
         self.num_classes = num_classes
         self.feat_channels = feat_channels
         self.use_sigmoid_cls = loss_cls.get('use_sigmoid', False)
+
+        self.dateAndTime = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        self.log_count = 0
+
         # TODO better way to determine whether sample or not
         self.sampling = loss_cls['type'] not in [
             'FocalLoss', 'GHMC', 'QualityFocalLoss'
@@ -151,6 +193,9 @@ class AnchorHead(BaseDenseHead, BBoxTestMixin):
                 anchor_list (list[Tensor]): Anchors of each image.
                 valid_flag_list (list[Tensor]): Valid flags of each image.
         """
+        
+        self.log_count += 1
+
         num_imgs = len(img_metas)
 
         # since feature map sizes of all images are the same, we only compute
@@ -219,6 +264,13 @@ class AnchorHead(BaseDenseHead, BBoxTestMixin):
             None if self.sampling else gt_labels)
         sampling_result = self.sampler.sample(assign_result, anchors,
                                               gt_bboxes)
+
+        plot_control = True
+        if self.log_count%250==0 and plot_control:
+            plot_control = False
+            visualize_bboxes(sampling_result, gt_bboxes, f"plot_log_{self.log_count}", self.dateAndTime)
+        else:
+            plot_control = True
 
         num_valid_anchors = anchors.shape[0]
         bbox_targets = torch.zeros_like(anchors)

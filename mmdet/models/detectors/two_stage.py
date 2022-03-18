@@ -1,6 +1,7 @@
 import warnings
 
 import torch
+import torch.nn
 
 from ..builder import DETECTORS, build_backbone, build_head, build_neck
 from .base import BaseDetector
@@ -29,6 +30,22 @@ class TwoStageDetector(BaseDetector):
                           'please use "init_cfg" instead')
             backbone.pretrained = pretrained
         self.backbone = build_backbone(backbone)
+        # self.convy = torch.nn.Conv2d(1, 3, 1) 
+        # self.convfpn = torch.nn.Conv2d(512, 256, 1)
+        # self.conv1x1 = torch.nn.Conv2d(4, 3, 1) 
+        # self.relu = torch.nn.ReLU() 
+
+
+        # Middle fusion II
+        self.relu = torch.nn.ReLU() 
+        self.convy = torch.nn.Conv2d(1, 3, 1) 
+        
+        # RetinaNet
+        self.convfpn0 = torch.nn.Conv2d(512, 256, 1)
+        self.convfpn1 = torch.nn.Conv2d(512, 256, 1)   
+        self.convfpn2 = torch.nn.Conv2d(512, 256, 1)
+        self.convfpn3 = torch.nn.Conv2d(512, 256, 1)
+        self.convfpn4 = torch.nn.Conv2d(512, 256, 1)
 
         if neck is not None:
             self.neck = build_neck(neck)
@@ -63,10 +80,52 @@ class TwoStageDetector(BaseDetector):
 
     def extract_feat(self, img):
         """Directly extract features from the backbone+neck."""
-        x = self.backbone(img)
+        # img = self.conv1x1(img)
+        # img = self.relu(img) 
+        # x = self.backbone(img)
+        # # y = self.relu(self.convy(img[:,3:,:,:]))
+        # # x = self.backbone(img[:,0:3,:,:])
+        # # y = self.backbone(y)
+        # if self.with_neck:
+        #     x = self.neck(x)
+        # #     y = self.neck(y)
+        # # z = ()
+        # # for i in range(len(x)):
+        # #     w = torch.cat((x[i], torch.mul(y[i], 1.0/(i+1))),1)
+        # #     z = z + (self.relu(self.convfpn(w)),)
+        # # z = torch.cat(x, y, 1)
+        # # z = self.relu(self.conv1x1(z))
+        # return x
+        # # return z
+
+
+        # # Middle fusion II
+        x = self.backbone(img[:,0:3,:,:])
+        y = self.relu(self.convy(img[:,3:,:,:]))
+        y = self.backbone(y)
+
         if self.with_neck:
             x = self.neck(x)
-        return x
+            y = self.neck(y)
+        
+        z = ()
+        w = torch.cat((x[0], y[0]),1)
+        z = z + (self.relu(self.convfpn0(w)),)
+
+        w = torch.cat((x[1], y[1]),1)
+        z = z + (self.relu(self.convfpn1(w)),)
+
+        w = torch.cat((x[2], y[2]),1)
+        z = z + (self.relu(self.convfpn2(w)),)
+  
+        w = torch.cat((x[3], y[3]),1)
+        z = z + (self.relu(self.convfpn3(w)),)
+
+        w = torch.cat((x[4], y[4]),1)
+        z = z + (self.relu(self.convfpn4(w)),)
+
+
+        return z
 
     def forward_dummy(self, img):
         """Used for computing network flops.

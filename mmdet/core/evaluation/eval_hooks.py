@@ -18,7 +18,47 @@ class EvalHook(BaseEvalHook):
         runner.log_buffer.output['eval_iter_num'] = len(self.dataloader)
         key_score = self.evaluate(runner, results)
         if self.save_best:
-            self._save_ckpt(runner, key_score)
+            self.save_best_checkpoint(runner, key_score)
+
+    def after_train_iter(self, runner):
+        if self.by_epoch or not self.every_n_iters(runner, self.interval):
+            return
+        from mmdet.apis import single_gpu_test
+        results = single_gpu_test(runner.model, self.dataloader, show=False)
+        key_score = self.evaluate(runner, results)
+        if self.save_best:
+            self.save_best_checkpoint(runner, key_score)
+
+    def save_best_checkpoint(self, runner, key_score):
+        best_score = runner.meta['hook_msgs'].get(
+            'best_score', self.init_value_map[self.rule])
+        if self.compare_func(key_score, best_score):
+            best_score = key_score
+            runner.meta['hook_msgs']['best_score'] = best_score
+            last_ckpt = runner.meta['hook_msgs']['last_ckpt']
+            runner.meta['hook_msgs']['best_ckpt'] = last_ckpt
+            mmcv.symlink(
+                last_ckpt,
+                osp.join(runner.work_dir, f'best_{self.key_indicator}.pth'))
+            time_stamp = runner.epoch + 1 if self.by_epoch else runner.iter + 1
+            self.logger.info(f'Now best checkpoint is epoch_{time_stamp}.pth.'
+                             f'Best {self.key_indicator} is {best_score:0.4f}')
+
+    def evaluate(self, runner, results):
+        eval_res = self.dataloader.dataset.evaluate(
+            results, logger=runner.logger, **self.eval_kwargs)
+        for name, val in eval_res.items():
+        # for name, val in eval_res[0].items():
+            runner.log_buffer.output[name] = val
+        runner.log_buffer.ready = True
+        if self.save_best is not None:
+            if self.key_indicator == 'auto':
+                # infer from eval_results
+                self._init_rule(self.rule, list(eval_res.keys())[0])
+            return eval_res[self.key_indicator]
+        else:
+            return None
+
 
 
 class DistEvalHook(BaseDistEvalHook):

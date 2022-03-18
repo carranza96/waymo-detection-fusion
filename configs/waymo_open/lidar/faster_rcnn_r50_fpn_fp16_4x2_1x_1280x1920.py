@@ -1,13 +1,12 @@
 _base_ = [
     '../../_base_/models/faster_rcnn_r50_fpn.py',
-    '../../_base_/datasets/waymo_detection_1280x1920_lidar.py',
+    '../../_base_/datasets/waymo_detection_1280x1920.py',
     '../../_base_/schedules/schedule_1x.py', '../../_base_/default_runtime.py'
 ]
 # model
-model = dict(backbone=dict(in_channels=4),
-             roi_head=dict(bbox_head=dict(num_classes=3)))
+model = dict(roi_head=dict(bbox_head=dict(num_classes=3)))
 # data
-data = dict(samples_per_gpu=4)
+data = dict(samples_per_gpu=2)
 
 
 # lr is set for a batch size of 8

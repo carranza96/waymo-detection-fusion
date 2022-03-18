@@ -164,11 +164,15 @@ class LoadMultiChannelImageFromFiles:
         else:
             filename = results['img_info']['filename']
 
+        filename[1] = filename[1].replace("lidar","enet")
         img = []
         out = output(filename[0],filename[1])
         for name in filename:
             img_bytes = self.file_client.get(name)
-            img.append(mmcv.imfrombytes(img_bytes, flag=self.color_type))
+            if "u16" in name:
+                img.append(mmcv.imfrombytes(img_bytes, flag=self.color_type) / 256)
+            else:
+                img.append(mmcv.imfrombytes(img_bytes, flag=self.color_type))
         # img = np.stack(img, axis=-1)
         img[1] = out
         img = np.dstack(img)
@@ -182,7 +186,7 @@ class LoadMultiChannelImageFromFiles:
         results['ori_shape'] = img.shape
         # Set initial values for default meta_keys
         results['pad_shape'] = img.shape
-        results['scale_factor'] = 1.0
+        # results['scale_factor'] = 1.0
         num_channels = 1 if len(img.shape) < 3 else img.shape[2]
         results['img_norm_cfg'] = dict(
             mean=np.zeros(num_channels, dtype=np.float32),

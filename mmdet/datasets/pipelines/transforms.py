@@ -281,23 +281,24 @@ class Resize:
         """
 
         if 'scale' not in results:
-            if 'scale_factor' in results:
-                img_shape = results['img'].shape[:2]
-                scale_factor = results['scale_factor']
-                assert isinstance(scale_factor, float)
-                results['scale'] = tuple(
-                    [int(x * scale_factor) for x in img_shape][::-1])
-            else:
-                self._random_scale(results)
-        else:
-            if not self.override:
-                assert 'scale_factor' not in results, (
-                    'scale and scale_factor cannot be both set.')
-            else:
-                results.pop('scale')
-                if 'scale_factor' in results:
-                    results.pop('scale_factor')
-                self._random_scale(results)
+            self._random_scale(results)
+        #     if 'scale_factor' in results:
+        #         img_shape = results['img'].shape[:2]
+        #         scale_factor = results['scale_factor']
+        #         assert isinstance(scale_factor, float)
+        #         results['scale'] = tuple(
+        #             [int(x * scale_factor) for x in img_shape][::-1])
+        #     else:
+        #         self._random_scale(results)
+        # else:
+        #     if not self.override:
+        #         assert 'scale_factor' not in results, (
+        #             'scale and scale_factor cannot be both set.')
+        #     else:
+        #         results.pop('scale')
+        #         if 'scale_factor' in results:
+        #             results.pop('scale_factor')
+        #         self._random_scale(results)
 
         self._resize_img(results)
         self._resize_bboxes(results)

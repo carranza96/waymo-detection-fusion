@@ -81,11 +81,18 @@ class KittiDataset(Dataset):
         if(split=="train"):
             glob_d = os.path.join(
                 root_dir_depth,
-                'data_depth_velodyne/train/*_sync/proj_depth/velodyne_raw/image_0[2,3]/*.png')
+                'data_depth_velodyne/train/2011_09_26_drive_0001_sync/proj_depth/velodyne_raw/image_0[2,3]/*.png')
             glob_gt = os.path.join(
                 root_dir_depth,
-                'data_depth_annotated/train/*_sync/proj_depth/groundtruth/image_0[2,3]/*.png'
+                'data_depth_annotated/train/2011_09_26_drive_0001_sync/proj_depth/groundtruth/image_0[2,3]/*.png'
             )
+            # glob_d = os.path.join(
+            #     root_dir_depth,
+            #     'data_depth_velodyne/train/*_sync/proj_depth/velodyne_raw/image_0[2,3]/*.png')
+            # glob_gt = os.path.join(
+            #     root_dir_depth,
+            #     'data_depth_annotated/train/*_sync/proj_depth/groundtruth/image_0[2,3]/*.png'
+            # )
 
             def get_rgb_paths(p):
                 ps = p.split('/')
@@ -96,11 +103,18 @@ class KittiDataset(Dataset):
         elif(split=="val"):
             glob_d = os.path.join(
                 root_dir_depth,
-                'data_depth_velodyne/val/*_sync/proj_depth/velodyne_raw/image_0[2,3]/*.png')
+                'data_depth_velodyne/val/2011_09_26_drive_0002_sync/proj_depth/velodyne_raw/image_0[2,3]/*.png')
             glob_gt = os.path.join(
                 root_dir_depth,
-                'data_depth_annotated/val/*_sync/proj_depth/groundtruth/image_0[2,3]/*.png'
+                'data_depth_annotated/val/2011_09_26_drive_0002_sync/proj_depth/groundtruth/image_0[2,3]/*.png'
             )
+            # glob_d = os.path.join(
+            #     root_dir_depth,
+            #     'data_depth_velodyne/val/*_sync/proj_depth/velodyne_raw/image_0[2,3]/*.png')
+            # glob_gt = os.path.join(
+            #     root_dir_depth,
+            #     'data_depth_annotated/val/*_sync/proj_depth/groundtruth/image_0[2,3]/*.png'
+            # )
 
             def get_rgb_paths(p):
                 ps = p.split('/')

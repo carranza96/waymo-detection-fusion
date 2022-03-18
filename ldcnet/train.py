@@ -45,6 +45,13 @@ def adjust_learning_rate(lr_init, optimizer, epoch):
         param_group['lr'] = lr
     return lr
 
+# Print iterations progress
+def printProgress(iteration, total):
+    percent = ("{0:.1f}").format(100 * (iteration / float(total)))
+    filledLength = int(100 * iteration // total)
+    bar = '█' * filledLength + '-' * (100 - filledLength)
+    print(f'\r{""} |{bar}| {percent}% {""}', end = '\r')
+
 
 def main():
     h, w = 352, 1216
@@ -66,7 +73,7 @@ def main():
 
     absolute_loss = 9999999999999
     a = len(train_loader)
-    epochs = 25
+    epochs = 5
 
     model = None
 
@@ -110,7 +117,7 @@ def main():
                 features[:,0:3,:,:] = rgb
                 features[:,3,:,:] = np.reshape(d, (rgb.shape[0], h, w))
 
-                args = {"position": torch.tensor(batch_features["position"]).view(-1, 2, h, w).to(device), "K": torch.tensor(batch_features["K"]).view(-1, 3, 3).to(device)}
+                args = {"position": batch_features["position"].clone().detach().view(-1, 2, h, w).to(device), "K":  batch_features["K"].clone().detach().view(-1, 3, 3).to(device)}
 
                 batch_features = torch.tensor(features).view(-1, 4, h, w).to(device)
                 optimizer.zero_grad()
@@ -148,11 +155,14 @@ def main():
                 relative_time = time.time() - start
                 absolute_time = absolute_time + relative_time
 
-                finish = (absolute_time / (i+1)) * a - absolute_time
+                finish = (epochs - epoch - 1) * a * (absolute_time / (i+1)) + (absolute_time / (i+1)) * a - absolute_time
+
+                printProgress(i, a)
 
                 if(i%50 == 0):
-                    text_to_write = "Epoch: [" +  str(epoch) +  "] [" +  str(i) +  " / " +  str(a) +  "]  eta: " +  str(datetime.timedelta(seconds=int(finish))) + "Loss: " + str(float(train_loss)) 
-                    print(text_to_write)
+                    text_to_write = "Epoch: [" +  str(epoch + 1) +  "] [" +  str(i) +  " / " +  str(a) +  "]  eta: " +  str(datetime.timedelta(seconds=int(finish))) + ", Loss: " + str(float(train_loss)) 
+                    print(115 * " ", end="\r")
+                    print(text_to_write + "\n", end = '\r')
                     file.write(text_to_write + "\n")
 
                 t_loss = t_loss + float(train_loss)
@@ -166,7 +176,7 @@ def main():
                 with torch.no_grad():
                     rgb = batch_features["rgb"]
                     d = batch_features["d"]
-                    gt = torch.tensor(batch_features['gt']).float()
+                    gt = batch_features['gt']
                     gt = gt.view(-1, 1, h, w).to(device)
 
                     features = np.zeros((d.shape[0], 4, h, w))
@@ -174,7 +184,7 @@ def main():
                     features[:,0:3,:,:] = rgb
                     features[:,3,:,:] = np.reshape(d,(rgb.shape[0], h, w))
 
-                    args = {"position": torch.tensor(batch_features["position"]).view(-1, 2, h, w).to(device), "K": torch.tensor(batch_features["K"]).view(-1, 3, 3).to(device)}
+                    args = {"position": batch_features["position"].clone().detach().view(-1, 2, h, w).to(device), "K":  batch_features["K"].clone().detach().view(-1, 3, 3).to(device)}
 
                     batch_features = torch.tensor(features).view(-1, 4, h, w).to(device)
 
@@ -211,7 +221,9 @@ def main():
             if (v_loss < absolute_loss):
                 torch.save(model.state_dict(),"ldcnet/results/{}/LDCNet_Best.pth".format(temp))
                 absolute_loss = v_loss
+
             
+            print(115 * " ", end="\r")
             print("epoch : {}/{}, validation loss = {:.6f} , training loss = {:.6f}, Execution time = {:.6f}".format(epoch + 1, epochs, v_loss, t_loss, ex_time))
             to_text = "epoch : {}/{}, validation loss = {:.6f} , training loss = {:.6f} \nExecution time = {:.6f}\n\n".format(epoch + 1, epochs, v_loss, t_loss, ex_time)
             file.write(to_text)
